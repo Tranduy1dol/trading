@@ -1,0 +1,16 @@
+use crate::price::Price;
+
+pub enum OrderSide {
+    Buy,
+    Sell,
+}
+
+pub struct Order {
+    pub id: u64,
+    pub user_id: u64,
+    pub asset_id: u64,
+    pub quantity: u64,
+    pub price: Price,
+    pub side: OrderSide,
+    pub timestamp: u64,
+}
