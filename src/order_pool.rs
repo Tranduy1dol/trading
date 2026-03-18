@@ -35,4 +35,8 @@ impl OrderPool {
             index
         }
     }
+
+    pub fn deallocate(&mut self, index: usize) {
+        self.free_list.push(index);
+    }
 }

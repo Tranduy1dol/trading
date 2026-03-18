@@ -1,8 +1,15 @@
 use crate::price::Price;
 
+#[derive(PartialEq)]
 pub enum OrderSide {
     Buy,
     Sell,
+}
+
+pub enum OrderType {
+    GTC,
+    IOC,
+    FOK,
 }
 
 pub struct Order {
@@ -12,5 +19,6 @@ pub struct Order {
     pub quantity: u64,
     pub price: Price,
     pub side: OrderSide,
+    pub r#type: OrderType,
     pub timestamp: u64,
 }
