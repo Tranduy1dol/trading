@@ -1,4 +1,4 @@
-use crate::order_queue::OrderQueue;
+use crate::{order_pool::OrderPool, order_queue::OrderQueue};
 
 const CHUNK: usize = 64;
 const MAX_LEVEL: usize = 1001;
@@ -35,5 +35,31 @@ impl PriceLevel {
             self.totals[index] = 0;
             self.clear_bit(index);
         }
+    }
+
+    pub fn set_pool(&mut self, pool: &OrderPool) {
+        todo!()
+    }
+
+    fn find_next_non_empty_from(&self, start: usize) -> Option<usize> {
+        if start >= MAX_LEVEL {
+            return None;
+        }
+
+        let chunk = start / CHUNK;
+        let offset = start % CHUNK;
+
+        let mut w = self.bitmap[chunk] & (!0u64 << offset);
+        if w != 0 {
+            return Some(chunk * CHUNK + w.trailing_zeros() as usize);
+        }
+
+        for c in (chunk + 1)..B {
+            if self.bitmap[c] != 0 {
+                return Some(c * CHUNK + self.bitmap[c].trailing_zeros() as usize);
+            }
+        }
+
+        None
     }
 }
