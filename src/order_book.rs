@@ -17,6 +17,10 @@ pub struct OrderBook {
 }
 
 impl OrderBook {
+    fn process_add_order(&mut self, side: OrderSide, mut order: Order, find_index_fn: F, ) {
+
+    }
+
     pub fn add_order(&mut self, mut order: Order) {
         let mut remaining_qty = order.quantity;
 
