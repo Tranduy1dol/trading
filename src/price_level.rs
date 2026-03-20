@@ -1,8 +1,9 @@
-use crate::order_queue::OrderQueue;
+use crate::{order_queue::OrderQueue, price::Price};
 
-const CHUNK: usize = 64;
 pub const MAX_LEVEL: usize = 1001;
+const CHUNK: usize = 64;
 const B: usize = MAX_LEVEL.div_ceil(CHUNK);
+const PRICE_OFFSET: u64 = 10000;
 
 pub struct PriceLevel {
     pub levels: [OrderQueue; MAX_LEVEL],
@@ -91,5 +92,23 @@ impl PriceLevel {
         }
 
         None
+    }
+
+    pub fn get_price_from_index(&self, index: usize) -> Price {
+        Price(index as u64 + PRICE_OFFSET)
+    }
+
+    pub fn get_index_from_price(&self, price: Price) -> Option<usize> {
+        if price.0 < PRICE_OFFSET {
+            return None;
+        }
+
+        let index = (price.0 - PRICE_OFFSET) as usize;
+
+        if index >= MAX_LEVEL {
+            None
+        } else {
+            Some(index)
+        }
     }
 }

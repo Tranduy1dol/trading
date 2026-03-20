@@ -1,6 +1,6 @@
 use crate::price::Price;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 pub enum OrderSide {
     Buy,
     Sell,
