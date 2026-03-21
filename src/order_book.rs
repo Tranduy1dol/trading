@@ -20,6 +20,47 @@ pub struct OrderBook {
 }
 
 impl OrderBook {
+    pub fn add_order(&mut self, mut order: Order) {
+        let remaining_qty = if order.side == OrderSide::Buy {
+            let current_level = self.asks.find_next_non_empty_from(0);
+            Self::execute_match(
+                &mut self.id_to_index,
+                &mut self.id_to_price,
+                &mut self.asks,
+                &mut self.pool,
+                &mut order,
+                current_level,
+                |taker_price, level_price| taker_price.0 >= level_price.0,
+                |level, idx| level.find_next_non_empty_from(idx + 1),
+            )
+        } else {
+            let current_level = self
+                .bids
+                .find_prev_non_empty_from(crate::price_level::MAX_LEVEL - 1);
+            Self::execute_match(
+                &mut self.id_to_index,
+                &mut self.id_to_price,
+                &mut self.bids,
+                &mut self.pool,
+                &mut order,
+                current_level,
+                |taker_price, level_price| taker_price.0 <= level_price.0,
+                |level, idx| {
+                    if idx > 0 {
+                        level.find_prev_non_empty_from(idx - 1)
+                    } else {
+                        None
+                    }
+                },
+            )
+        };
+
+        if remaining_qty > 0 {
+            order.quantity = remaining_qty;
+            self.insert_maker(order);
+        }
+    }
+
     pub fn cancel_order(&mut self, order_id: u64) {
         let node_index = match self.id_to_index.get(&order_id) {
             Some(&idx) => idx,
@@ -66,45 +107,26 @@ impl OrderBook {
         self.id_to_price.remove(&order_id);
     }
 
-    pub fn add_order(&mut self, mut order: Order) {
-        let remaining_qty = if order.side == OrderSide::Buy {
-            let current_level = self.asks.find_next_non_empty_from(0);
-            Self::execute_match(
-                &mut self.id_to_index,
-                &mut self.id_to_price,
-                &mut self.asks,
-                &mut self.pool,
-                &mut order,
-                current_level,
-                |taker_price, level_price| taker_price.0 >= level_price.0,
-                |level, idx| level.find_next_non_empty_from(idx + 1),
-            )
-        } else {
-            let current_level = self
-                .bids
-                .find_prev_non_empty_from(crate::price_level::MAX_LEVEL - 1);
-            Self::execute_match(
-                &mut self.id_to_index,
-                &mut self.id_to_price,
-                &mut self.bids,
-                &mut self.pool,
-                &mut order,
-                current_level,
-                |taker_price, level_price| taker_price.0 <= level_price.0,
-                |level, idx| {
-                    if idx > 0 {
-                        level.find_prev_non_empty_from(idx - 1)
-                    } else {
-                        None
-                    }
-                },
-            )
+    pub fn modify_order(&mut self, order_id: u64, new_price: Price, new_qty: u64) {
+        let node_index = match self.id_to_index.get(&order_id) {
+            Some(&idx) => idx,
+            None => return,
         };
 
-        if remaining_qty > 0 {
-            order.quantity = remaining_qty;
-            self.insert_maker(order);
-        }
+        let node = &self.pool.nodes[node_index];
+        let order = Order {
+            id: node.order.id,
+            user_id: node.order.user_id,
+            asset_id: node.order.asset_id,
+            quantity: new_qty,
+            price: new_price,
+            side: node.order.side,
+            r#type: crate::order::OrderType::GTC,
+            timestamp: node.order.timestamp,
+        };
+
+        self.cancel_order(order_id);
+        self.insert_maker(order);
     }
 
     #[allow(clippy::too_many_arguments)]
