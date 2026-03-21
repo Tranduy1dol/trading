@@ -12,14 +12,6 @@ pub struct PriceLevel {
 }
 
 impl PriceLevel {
-    const fn bit_index_to_level(&self, chunk: usize, bit: usize) -> usize {
-        chunk * CHUNK + bit
-    }
-
-    const fn total_at(&self, index: usize) -> u64 {
-        self.totals[index]
-    }
-
     fn set_bit(&mut self, index: usize) {
         self.bitmap[index / CHUNK] |= 1 << (index % CHUNK);
     }
@@ -32,6 +24,15 @@ impl PriceLevel {
         self.totals[index] += delta;
         if self.totals[index] > 0 {
             self.set_bit(index);
+        } else {
+            self.totals[index] = 0;
+            self.clear_bit(index);
+        }
+    }
+
+    pub fn sub_qty_at(&mut self, index: usize, delta: u64) {
+        if self.totals[index] > delta {
+            self.totals[index] -= delta;
         } else {
             self.totals[index] = 0;
             self.clear_bit(index);
@@ -60,15 +61,6 @@ impl PriceLevel {
         None
     }
 
-    pub fn sub_qty_at(&mut self, index: usize, delta: u64) {
-        if self.totals[index] > delta {
-            self.totals[index] -= delta;
-        } else {
-            self.totals[index] = 0;
-            self.clear_bit(index);
-        }
-    }
-
     pub fn find_prev_non_empty_from(&self, start: usize) -> Option<usize> {
         let start = if start >= MAX_LEVEL {
             MAX_LEVEL - 1
@@ -94,11 +86,11 @@ impl PriceLevel {
         None
     }
 
-    pub fn get_price_from_index(&self, index: usize) -> Price {
+    pub fn get_price_from_index(index: usize) -> Price {
         Price(index as u64 + PRICE_OFFSET)
     }
 
-    pub fn get_index_from_price(&self, price: Price) -> Option<usize> {
+    pub fn get_index_from_price(price: Price) -> Option<usize> {
         if price.0 < PRICE_OFFSET {
             return None;
         }
