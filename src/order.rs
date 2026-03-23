@@ -22,3 +22,26 @@ pub struct Order {
     pub r#type: OrderType,
     pub timestamp: u64,
 }
+
+impl Order {
+    pub fn new(
+        id: u64,
+        user_id: u64,
+        asset_id: u64,
+        quantity: u64,
+        price: Price,
+        side: OrderSide,
+        r#type: OrderType,
+    ) -> Self {
+        Self {
+            id,
+            user_id,
+            asset_id,
+            quantity,
+            price,
+            side,
+            r#type,
+            timestamp: chrono::Utc::now().timestamp() as u64,
+        }
+    }
+}

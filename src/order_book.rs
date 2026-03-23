@@ -20,6 +20,18 @@ pub struct OrderBook {
 }
 
 impl OrderBook {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            pool: OrderPool::new(capacity),
+            bids: PriceLevel::new(),
+            asks: PriceLevel::new(),
+            id_to_index: FxHashMap::default(),
+            id_to_price: FxHashMap::default(),
+            best_ask_index: None,
+            best_bid_index: None,
+        }
+    }
+
     pub fn add_order(&mut self, mut order: Order) {
         let remaining_qty = if order.side == OrderSide::Buy {
             let current_level = self.asks.find_next_non_empty_from(0);

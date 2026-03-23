@@ -11,13 +11,19 @@ pub struct PriceLevel {
     totals: [u64; MAX_LEVEL],
 }
 
-impl PriceLevel {
-    fn set_bit(&mut self, index: usize) {
-        self.bitmap[index / CHUNK] |= 1 << (index % CHUNK);
+impl Default for PriceLevel {
+    fn default() -> Self {
+        Self {
+            levels: std::array::from_fn(|_| OrderQueue::new()),
+            bitmap: [0u64; B],
+            totals: [0u64; MAX_LEVEL],
+        }
     }
+}
 
-    fn clear_bit(&mut self, index: usize) {
-        self.bitmap[index / CHUNK] &= !(1 << (index % CHUNK));
+impl PriceLevel {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn add_qty_at(&mut self, index: usize, delta: u64) {
@@ -102,5 +108,13 @@ impl PriceLevel {
         } else {
             Some(index)
         }
+    }
+
+    fn set_bit(&mut self, index: usize) {
+        self.bitmap[index / CHUNK] |= 1 << (index % CHUNK);
+    }
+
+    fn clear_bit(&mut self, index: usize) {
+        self.bitmap[index / CHUNK] &= !(1 << (index % CHUNK));
     }
 }
