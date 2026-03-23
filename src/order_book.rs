@@ -1,10 +1,10 @@
 use rustc_hash::FxHashMap;
 
 use crate::{
-    order::{Order, OrderSide},
+    order::{Order, OrderSide, OrderType},
     order_pool::OrderPool,
     price::Price,
-    price_level::PriceLevel,
+    price_level::{MAX_LEVEL, PriceLevel},
 };
 
 pub struct OrderBook {
@@ -33,28 +33,44 @@ impl OrderBook {
     }
 
     pub fn add_order(&mut self, mut order: Order) {
-        let remaining_qty = if order.side == OrderSide::Buy {
+        match order.r#type {
+            OrderType::GTC | OrderType::IOC => {
+                let remaining_qty = self.match_order(&mut order);
+
+                if remaining_qty > 0 && matches!(order.r#type, OrderType::GTC) {
+                    order.quantity = remaining_qty;
+                    self.insert_maker(order);
+                }
+            }
+            OrderType::FOK => {
+                if self.check_available(&order) >= order.quantity as i64 {
+                    self.match_order(&mut order);
+                }
+            }
+        }
+    }
+
+    fn match_order(&mut self, order: &mut Order) -> u64 {
+        if order.side == OrderSide::Buy {
             let current_level = self.asks.find_next_non_empty_from(0);
             Self::execute_match(
                 &mut self.id_to_index,
                 &mut self.id_to_price,
                 &mut self.asks,
                 &mut self.pool,
-                &mut order,
+                order,
                 current_level,
                 |taker_price, level_price| taker_price.0 >= level_price.0,
                 |level, idx| level.find_next_non_empty_from(idx + 1),
             )
         } else {
-            let current_level = self
-                .bids
-                .find_prev_non_empty_from(crate::price_level::MAX_LEVEL - 1);
+            let current_level = self.bids.find_prev_non_empty_from(MAX_LEVEL - 1);
             Self::execute_match(
                 &mut self.id_to_index,
                 &mut self.id_to_price,
                 &mut self.bids,
                 &mut self.pool,
-                &mut order,
+                order,
                 current_level,
                 |taker_price, level_price| taker_price.0 <= level_price.0,
                 |level, idx| {
@@ -65,11 +81,36 @@ impl OrderBook {
                     }
                 },
             )
-        };
+        }
+    }
 
-        if remaining_qty > 0 {
-            order.quantity = remaining_qty;
-            self.insert_maker(order);
+    fn check_available(&self, order: &Order) -> i64 {
+        if order.side == OrderSide::Buy {
+            let current_level = self.asks.find_next_non_empty_from(0);
+            Self::available_qty(
+                &self.asks,
+                &self.pool,
+                order,
+                current_level,
+                |taker_price, level_price| taker_price.0 >= level_price.0,
+                |level, idx| level.find_next_non_empty_from(idx + 1),
+            )
+        } else {
+            let current_level = self.bids.find_prev_non_empty_from(MAX_LEVEL - 1);
+            Self::available_qty(
+                &self.bids,
+                &self.pool,
+                order,
+                current_level,
+                |taker_price, level_price| taker_price.0 <= level_price.0,
+                |level, idx| {
+                    if idx > 0 {
+                        level.find_prev_non_empty_from(idx - 1)
+                    } else {
+                        None
+                    }
+                },
+            )
         }
     }
 
@@ -245,5 +286,48 @@ impl OrderBook {
                 }
             }
         }
+    }
+
+    fn available_qty<Fcond, Fnext>(
+        oposite_level: &PriceLevel,
+        pool: &OrderPool,
+        taker: &Order,
+        mut current_level: Option<usize>,
+        price_condition: Fcond,
+        next_level: Fnext,
+    ) -> i64
+    where
+        Fcond: Fn(Price, Price) -> bool,
+        Fnext: Fn(&PriceLevel, usize) -> Option<usize>,
+    {
+        let mut remaining_qty = taker.quantity;
+        while let Some(level_idx) = current_level {
+            let level_price = PriceLevel::get_price_from_index(level_idx);
+            if !price_condition(taker.price, level_price) || remaining_qty == 0 {
+                break;
+            }
+
+            let mut current_node_index = oposite_level.levels[level_idx].head;
+            while let Some(node_idx) = current_node_index {
+                if remaining_qty == 0 {
+                    break;
+                }
+
+                let node = &pool.nodes[node_idx];
+                if node.order.user_id == taker.user_id {
+                    current_node_index = node.next;
+                    continue;
+                }
+
+                let trade_qty = std::cmp::min(remaining_qty, node.order.quantity);
+                remaining_qty -= trade_qty;
+
+                current_node_index = node.next;
+            }
+
+            current_level = next_level(oposite_level, level_idx);
+        }
+
+        taker.quantity as i64 - remaining_qty as i64
     }
 }
