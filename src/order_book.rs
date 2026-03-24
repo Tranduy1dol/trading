@@ -50,70 +50,6 @@ impl OrderBook {
         }
     }
 
-    fn match_order(&mut self, order: &mut Order) -> u64 {
-        if order.side == OrderSide::Buy {
-            let current_level = self.asks.find_next_non_empty_from(0);
-            Self::execute_match(
-                &mut self.id_to_index,
-                &mut self.id_to_price,
-                &mut self.asks,
-                &mut self.pool,
-                order,
-                current_level,
-                |taker_price, level_price| taker_price.0 >= level_price.0,
-                |level, idx| level.find_next_non_empty_from(idx + 1),
-            )
-        } else {
-            let current_level = self.bids.find_prev_non_empty_from(MAX_LEVEL - 1);
-            Self::execute_match(
-                &mut self.id_to_index,
-                &mut self.id_to_price,
-                &mut self.bids,
-                &mut self.pool,
-                order,
-                current_level,
-                |taker_price, level_price| taker_price.0 <= level_price.0,
-                |level, idx| {
-                    if idx > 0 {
-                        level.find_prev_non_empty_from(idx - 1)
-                    } else {
-                        None
-                    }
-                },
-            )
-        }
-    }
-
-    fn check_available(&self, order: &Order) -> i64 {
-        if order.side == OrderSide::Buy {
-            let current_level = self.asks.find_next_non_empty_from(0);
-            Self::available_qty(
-                &self.asks,
-                &self.pool,
-                order,
-                current_level,
-                |taker_price, level_price| taker_price.0 >= level_price.0,
-                |level, idx| level.find_next_non_empty_from(idx + 1),
-            )
-        } else {
-            let current_level = self.bids.find_prev_non_empty_from(MAX_LEVEL - 1);
-            Self::available_qty(
-                &self.bids,
-                &self.pool,
-                order,
-                current_level,
-                |taker_price, level_price| taker_price.0 <= level_price.0,
-                |level, idx| {
-                    if idx > 0 {
-                        level.find_prev_non_empty_from(idx - 1)
-                    } else {
-                        None
-                    }
-                },
-            )
-        }
-    }
-
     pub fn cancel_order(&mut self, order_id: u64) {
         let node_index = match self.id_to_index.get(&order_id) {
             Some(&idx) => idx,
@@ -182,6 +118,83 @@ impl OrderBook {
         self.insert_maker(order);
     }
 
+    fn match_order(&mut self, order: &mut Order) -> u64 {
+        if order.side == OrderSide::Buy {
+            let current_level = self.asks.find_next_non_empty_from(0);
+            let rem = Self::execute_match(
+                &mut self.id_to_index,
+                &mut self.id_to_price,
+                &mut self.asks,
+                &mut self.pool,
+                order,
+                current_level,
+                |taker_price, level_price| taker_price.0 >= level_price.0,
+                |level, idx| level.find_next_non_empty_from(idx + 1),
+            );
+
+            if let Some(best) = self.best_ask_index {
+                if self.asks.levels[best].head.is_none() {
+                    self.best_ask_index = self.asks.find_next_non_empty_from(best);
+                }
+            }
+            rem
+        } else {
+            let current_level = self.bids.find_prev_non_empty_from(MAX_LEVEL - 1);
+            let rem = Self::execute_match(
+                &mut self.id_to_index,
+                &mut self.id_to_price,
+                &mut self.bids,
+                &mut self.pool,
+                order,
+                current_level,
+                |taker_price, level_price| taker_price.0 <= level_price.0,
+                |level, idx| {
+                    if idx > 0 {
+                        level.find_prev_non_empty_from(idx - 1)
+                    } else {
+                        None
+                    }
+                },
+            );
+
+            if let Some(best) = self.best_bid_index {
+                if self.bids.levels[best].head.is_none() {
+                    self.best_bid_index = self.bids.find_prev_non_empty_from(best);
+                }
+            }
+            rem
+        }
+    }
+
+    fn check_available(&self, order: &Order) -> i64 {
+        if order.side == OrderSide::Buy {
+            let current_level = self.asks.find_next_non_empty_from(0);
+            Self::available_qty(
+                &self.asks,
+                &self.pool,
+                order,
+                current_level,
+                |taker_price, level_price| taker_price.0 >= level_price.0,
+                |level, idx| level.find_next_non_empty_from(idx + 1),
+            )
+        } else {
+            let current_level = self.bids.find_prev_non_empty_from(MAX_LEVEL - 1);
+            Self::available_qty(
+                &self.bids,
+                &self.pool,
+                order,
+                current_level,
+                |taker_price, level_price| taker_price.0 <= level_price.0,
+                |level, idx| {
+                    if idx > 0 {
+                        level.find_prev_non_empty_from(idx - 1)
+                    } else {
+                        None
+                    }
+                },
+            )
+        }
+    }
     #[allow(clippy::too_many_arguments)]
     fn execute_match<Fcond, Fnext>(
         id_to_index: &mut FxHashMap<u64, usize>,
@@ -252,10 +265,6 @@ impl OrderBook {
     }
 
     fn insert_maker(&mut self, order: Order) {
-        if !matches!(order.r#type, crate::order::OrderType::GTC) {
-            return;
-        }
-
         let level = match PriceLevel::get_index_from_price(order.price) {
             Some(idx) => idx,
             None => return,
@@ -329,5 +338,176 @@ impl OrderBook {
         }
 
         taker.quantity as i64 - remaining_qty as i64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_order(
+        id: u64,
+        user_id: u64,
+        qty: u64,
+        price: u64,
+        side: OrderSide,
+        typ: OrderType,
+    ) -> Order {
+        Order::new(id, user_id, 1, qty, Price(price), side, typ)
+    }
+
+    #[test]
+    fn test_add_single_maker_order() {
+        let mut book = OrderBook::new(1024);
+        let order = create_order(1, 1, 100, 10000, OrderSide::Buy, OrderType::GTC);
+
+        book.add_order(order);
+
+        assert_eq!(book.best_bid_index, Some(0)); // 10000 -> index 0
+        assert_eq!(book.best_ask_index, None);
+        assert_eq!(book.bids.totals[0], 100);
+    }
+
+    #[test]
+    fn test_match_full_taker_order() {
+        let mut book = OrderBook::new(1024);
+
+        // Add Maker Ask: 100 units @ 10010 (index 10)
+        book.add_order(create_order(1, 1, 100, 10010, OrderSide::Sell, OrderType::GTC));
+        assert_eq!(book.best_ask_index, Some(10));
+        assert_eq!(book.asks.totals[10], 100);
+
+        // Taker Buy: 50 units @ 10010 (index 10) -> fully matches, 50 left in book
+        book.add_order(create_order(2, 2, 50, 10010, OrderSide::Buy, OrderType::GTC));
+
+        assert_eq!(book.asks.totals[10], 50);
+        // Taker buy order should not rest since it was fully filled
+        assert_eq!(book.best_bid_index, None);
+    }
+
+    #[test]
+    fn test_match_partial_taker_order_rests() {
+        let mut book = OrderBook::new(1024);
+
+        // Maker Ask: 50 units @ 10010
+        book.add_order(create_order(1, 1, 50, 10010, OrderSide::Sell, OrderType::GTC));
+
+        // Taker Buy: 100 units @ 10010 -> matches 50, rests 50
+        book.add_order(create_order(2, 2, 100, 10010, OrderSide::Buy, OrderType::GTC));
+
+        assert_eq!(book.asks.totals[10], 0);
+        assert_eq!(book.best_ask_index, None); // Level is empty
+
+        // Remaining 50 rests at 10010 (index 10)
+        assert_eq!(book.bids.totals[10], 50);
+        assert_eq!(book.best_bid_index, Some(10));
+    }
+
+    #[test]
+    fn test_ioc_order_does_not_rest() {
+        let mut book = OrderBook::new(1024);
+
+        // Maker Ask: 50 units @ 10010
+        book.add_order(create_order(1, 1, 50, 10010, OrderSide::Sell, OrderType::GTC));
+
+        // Taker Buy IOC: 100 units @ 10010
+        book.add_order(create_order(2, 2, 100, 10010, OrderSide::Buy, OrderType::IOC));
+
+        assert_eq!(book.asks.totals[10], 0);
+        assert_eq!(book.best_ask_index, None);
+
+        // IOC remainder of 50 should be discarded, not rested
+        assert_eq!(book.best_bid_index, None);
+    }
+
+    #[test]
+    fn test_fok_order_success() {
+        let mut book = OrderBook::new(1024);
+
+        // Maker Ask: 50 units @ 10010, 50 units @ 10020
+        book.add_order(create_order(1, 1, 50, 10010, OrderSide::Sell, OrderType::GTC));
+        book.add_order(create_order(2, 1, 50, 10020, OrderSide::Sell, OrderType::GTC));
+
+        // Taker Buy FOK: 100 units @ 10020 -> can be fully filled
+        book.add_order(create_order(3, 2, 100, 10020, OrderSide::Buy, OrderType::FOK));
+
+        // Entire asks side should be empty
+        assert_eq!(book.asks.totals[10], 0);
+        assert_eq!(book.asks.totals[20], 0);
+        assert_eq!(book.best_ask_index, None);
+    }
+
+    #[test]
+    fn test_fok_order_failure_due_to_price() {
+        let mut book = OrderBook::new(1024);
+
+        book.add_order(create_order(1, 1, 50, 10010, OrderSide::Sell, OrderType::GTC));
+        book.add_order(create_order(2, 1, 50, 10020, OrderSide::Sell, OrderType::GTC));
+
+        // Taker Buy FOK: 100 units @ 10015 -> cannot be fully filled (only 50 available at <= 10015)
+        book.add_order(create_order(3, 2, 100, 10015, OrderSide::Buy, OrderType::FOK));
+
+        // Book should be completely untouched
+        assert_eq!(book.asks.totals[10], 50);
+        assert_eq!(book.asks.totals[20], 50);
+        assert_eq!(book.best_ask_index, Some(10));
+    }
+
+    #[test]
+    fn test_fok_order_failure_due_to_quantity() {
+        let mut book = OrderBook::new(1024);
+
+        book.add_order(create_order(1, 1, 50, 10010, OrderSide::Sell, OrderType::GTC));
+
+        // Taker Buy FOK: 100 units @ 10020 -> not enough total quantity
+        book.add_order(create_order(2, 2, 100, 10020, OrderSide::Buy, OrderType::FOK));
+
+        // Book should be untouched
+        assert_eq!(book.asks.totals[10], 50);
+    }
+
+    #[test]
+    fn test_self_trade_prevention() {
+        let mut book = OrderBook::new(1024);
+
+        // User 1 Ask: 50 units @ 10010
+        book.add_order(create_order(1, 1, 50, 10010, OrderSide::Sell, OrderType::GTC));
+
+        // User 1 Buy: 50 units @ 10010 -> Should skip matching their own ask!
+        book.add_order(create_order(2, 1, 50, 10010, OrderSide::Buy, OrderType::GTC));
+
+        // Both orders should rest on book without matching
+        assert_eq!(book.asks.totals[10], 50);
+        assert_eq!(book.bids.totals[10], 50);
+    }
+
+    #[test]
+    fn test_cancel_order() {
+        let mut book = OrderBook::new(1024);
+
+        book.add_order(create_order(1, 1, 50, 10010, OrderSide::Sell, OrderType::GTC));
+        assert_eq!(book.asks.totals[10], 50);
+        assert_eq!(book.best_ask_index, Some(10));
+
+        book.cancel_order(1);
+
+        assert_eq!(book.asks.totals[10], 0);
+        assert_eq!(book.best_ask_index, None);
+        assert!(!book.id_to_index.contains_key(&1));
+    }
+
+    #[test]
+    fn test_modify_order() {
+        let mut book = OrderBook::new(1024);
+
+        book.add_order(create_order(1, 1, 50, 10010, OrderSide::Sell, OrderType::GTC));
+
+        // Modify to 100 units @ 10020
+        book.modify_order(1, Price(10020), 100);
+
+        assert_eq!(book.asks.totals[10], 0);
+        assert_eq!(book.asks.totals[20], 100);
+        assert_eq!(book.best_ask_index, Some(20));
+        assert!(book.id_to_index.contains_key(&1)); // Same ID rested
     }
 }

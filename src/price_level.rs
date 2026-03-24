@@ -8,7 +8,7 @@ const PRICE_OFFSET: u64 = 10000;
 pub struct PriceLevel {
     pub levels: [OrderQueue; MAX_LEVEL],
     bitmap: [u64; B],
-    totals: [u64; MAX_LEVEL],
+    pub totals: [u64; MAX_LEVEL],
 }
 
 impl Default for PriceLevel {
