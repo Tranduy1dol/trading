@@ -5,12 +5,14 @@ use crate::{
     order_pool::OrderPool,
     price::Price,
     price_level::{MAX_LEVEL, PriceLevel},
+    trade::Trade,
 };
 
 pub struct OrderBook {
     pool: OrderPool,
     bids: PriceLevel,
     asks: PriceLevel,
+    trades: Vec<Trade>,
 
     id_to_index: FxHashMap<u64, usize>,
     id_to_price: FxHashMap<u64, Price>,
@@ -25,6 +27,7 @@ impl OrderBook {
             pool: OrderPool::new(capacity),
             bids: PriceLevel::new(),
             asks: PriceLevel::new(),
+            trades: Vec::with_capacity(capacity),
             id_to_index: FxHashMap::default(),
             id_to_price: FxHashMap::default(),
             best_ask_index: None,
@@ -32,7 +35,8 @@ impl OrderBook {
         }
     }
 
-    pub fn add_order(&mut self, mut order: Order) {
+    pub fn add_order(&mut self, mut order: Order) -> &[Trade] {
+        let start = self.trades.len();
         match order.r#type {
             OrderType::GTC | OrderType::IOC => {
                 let remaining_qty = self.match_order(&mut order);
@@ -48,6 +52,8 @@ impl OrderBook {
                 }
             }
         }
+
+        &self.trades[start..]
     }
 
     pub fn cancel_order(&mut self, order_id: u64) {
@@ -127,6 +133,7 @@ impl OrderBook {
                 &mut self.asks,
                 &mut self.pool,
                 order,
+                &mut self.trades,
                 current_level,
                 |taker_price, level_price| taker_price.0 >= level_price.0,
                 |level, idx| level.find_next_non_empty_from(idx + 1),
@@ -146,6 +153,7 @@ impl OrderBook {
                 &mut self.bids,
                 &mut self.pool,
                 order,
+                &mut self.trades,
                 current_level,
                 |taker_price, level_price| taker_price.0 <= level_price.0,
                 |level, idx| {
@@ -202,6 +210,7 @@ impl OrderBook {
         oposite_level: &mut PriceLevel,
         pool: &mut OrderPool,
         taker: &mut Order,
+        trades: &mut Vec<Trade>,
         mut current_level: Option<usize>,
         price_condition: Fcond,
         next_level: Fnext,
@@ -238,6 +247,14 @@ impl OrderBook {
                 }
 
                 let trade_qty = std::cmp::min(remaining_qty, resting_qty);
+                trades.push(Trade {
+                    taker_order_id: taker.id,
+                    maker_order_id: resting_order_id,
+                    price: level_price,
+                    quantity: trade_qty,
+                    taker_side: taker.side,
+                    timestamp: taker.timestamp,
+                });
                 remaining_qty -= trade_qty;
 
                 let mut_node = unsafe { pool.nodes.get_unchecked_mut(node_idx) };
