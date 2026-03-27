@@ -23,7 +23,9 @@ fn setup_warmed_orderbook(size: usize) -> OrderBook {
             10000 - i as u64,
             OrderSide::Buy,
             OrderType::GTC,
-        ));
+        ))
+        .unwrap();
+
         // Asks: 10001 -> 10100
         book.add_order(create_order(
             i as u64 + size as u64,
@@ -31,7 +33,8 @@ fn setup_warmed_orderbook(size: usize) -> OrderBook {
             10000 + i as u64,
             OrderSide::Sell,
             OrderType::GTC,
-        ));
+        ))
+        .unwrap();
     }
     book
 }
@@ -45,7 +48,7 @@ fn bench_orderbook(c: &mut Criterion) {
             |book| {
                 // Taker Buy IOC: matches against the best ask (10001)
                 let order = create_order(99999, 10, 10001, OrderSide::Buy, OrderType::IOC);
-                book.add_order(black_box(order));
+                book.add_order(black_box(order)).unwrap();
             },
             criterion::BatchSize::SmallInput,
         );
@@ -57,7 +60,7 @@ fn bench_orderbook(c: &mut Criterion) {
             |book| {
                 // Deep bid that won't match anything
                 let order = create_order(99999, 10, 9500, OrderSide::Buy, OrderType::GTC);
-                book.add_order(black_box(order));
+                book.add_order(black_box(order)).unwrap();
             },
             criterion::BatchSize::SmallInput,
         );

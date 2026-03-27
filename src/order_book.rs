@@ -1,6 +1,7 @@
 use rustc_hash::FxHashMap;
 
 use crate::{
+    error::OrderError,
     order::{Order, OrderSide, OrderType},
     order_pool::OrderPool,
     price::Price,
@@ -35,7 +36,9 @@ impl OrderBook {
         }
     }
 
-    pub fn add_order(&mut self, mut order: Order) -> &[Trade] {
+    pub fn add_order(&mut self, mut order: Order) -> Result<&[Trade], OrderError> {
+        self.validate_order(&order)?;
+
         let start = self.trades.len();
         match order.r#type {
             OrderType::GTC | OrderType::IOC => {
@@ -53,7 +56,7 @@ impl OrderBook {
             }
         }
 
-        &self.trades[start..]
+        Ok(&self.trades[start..])
     }
 
     pub fn cancel_order(&mut self, order_id: u64) {
@@ -361,6 +364,22 @@ impl OrderBook {
 
         taker.quantity as i64 - remaining_qty as i64
     }
+
+    fn validate_order(&self, order: &Order) -> Result<(), OrderError> {
+        if order.quantity == 0 {
+            return Err(OrderError::ZeroQuantity);
+        }
+
+        if PriceLevel::get_index_from_price(order.price).is_none() {
+            return Err(OrderError::PriceOutOfRange);
+        }
+
+        if self.id_to_index.contains_key(&order.id) {
+            return Err(OrderError::DuplicateOrderId);
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -383,7 +402,7 @@ mod tests {
         let mut book = OrderBook::new(1024);
         let order = create_order(1, 1, 100, 10000, OrderSide::Buy, OrderType::GTC);
 
-        book.add_order(order);
+        book.add_order(order).unwrap();
 
         assert_eq!(book.best_bid_index, Some(0)); // 10000 -> index 0
         assert_eq!(book.best_ask_index, None);
@@ -402,7 +421,8 @@ mod tests {
             10010,
             OrderSide::Sell,
             OrderType::GTC,
-        ));
+        ))
+        .unwrap();
         assert_eq!(book.best_ask_index, Some(10));
         assert_eq!(book.asks.totals[10], 100);
 
@@ -414,7 +434,8 @@ mod tests {
             10010,
             OrderSide::Buy,
             OrderType::GTC,
-        ));
+        ))
+        .unwrap();
 
         assert_eq!(book.asks.totals[10], 50);
         // Taker buy order should not rest since it was fully filled
@@ -433,7 +454,8 @@ mod tests {
             10010,
             OrderSide::Sell,
             OrderType::GTC,
-        ));
+        ))
+        .unwrap();
 
         // Taker Buy: 100 units @ 10010 -> matches 50, rests 50
         book.add_order(create_order(
@@ -443,7 +465,8 @@ mod tests {
             10010,
             OrderSide::Buy,
             OrderType::GTC,
-        ));
+        ))
+        .unwrap();
 
         assert_eq!(book.asks.totals[10], 0);
         assert_eq!(book.best_ask_index, None); // Level is empty
@@ -465,7 +488,8 @@ mod tests {
             10010,
             OrderSide::Sell,
             OrderType::GTC,
-        ));
+        ))
+        .unwrap();
 
         // Taker Buy IOC: 100 units @ 10010
         book.add_order(create_order(
@@ -475,7 +499,8 @@ mod tests {
             10010,
             OrderSide::Buy,
             OrderType::IOC,
-        ));
+        ))
+        .unwrap();
 
         assert_eq!(book.asks.totals[10], 0);
         assert_eq!(book.best_ask_index, None);
@@ -496,7 +521,8 @@ mod tests {
             10010,
             OrderSide::Sell,
             OrderType::GTC,
-        ));
+        ))
+        .unwrap();
         book.add_order(create_order(
             2,
             1,
@@ -504,7 +530,8 @@ mod tests {
             10020,
             OrderSide::Sell,
             OrderType::GTC,
-        ));
+        ))
+        .unwrap();
 
         // Taker Buy FOK: 100 units @ 10020 -> can be fully filled
         book.add_order(create_order(
@@ -514,7 +541,8 @@ mod tests {
             10020,
             OrderSide::Buy,
             OrderType::FOK,
-        ));
+        ))
+        .unwrap();
 
         // Entire asks side should be empty
         assert_eq!(book.asks.totals[10], 0);
@@ -533,7 +561,8 @@ mod tests {
             10010,
             OrderSide::Sell,
             OrderType::GTC,
-        ));
+        ))
+        .unwrap();
         book.add_order(create_order(
             2,
             1,
@@ -541,7 +570,8 @@ mod tests {
             10020,
             OrderSide::Sell,
             OrderType::GTC,
-        ));
+        ))
+        .unwrap();
 
         // Taker Buy FOK: 100 units @ 10015 -> cannot be fully filled (only 50 available at <= 10015)
         book.add_order(create_order(
@@ -551,7 +581,8 @@ mod tests {
             10015,
             OrderSide::Buy,
             OrderType::FOK,
-        ));
+        ))
+        .unwrap();
 
         // Book should be completely untouched
         assert_eq!(book.asks.totals[10], 50);
@@ -570,7 +601,8 @@ mod tests {
             10010,
             OrderSide::Sell,
             OrderType::GTC,
-        ));
+        ))
+        .unwrap();
 
         // Taker Buy FOK: 100 units @ 10020 -> not enough total quantity
         book.add_order(create_order(
@@ -580,7 +612,8 @@ mod tests {
             10020,
             OrderSide::Buy,
             OrderType::FOK,
-        ));
+        ))
+        .unwrap();
 
         // Book should be untouched
         assert_eq!(book.asks.totals[10], 50);
@@ -598,7 +631,8 @@ mod tests {
             10010,
             OrderSide::Sell,
             OrderType::GTC,
-        ));
+        ))
+        .unwrap();
 
         // User 1 Buy: 50 units @ 10010 -> Should skip matching their own ask!
         book.add_order(create_order(
@@ -608,7 +642,8 @@ mod tests {
             10010,
             OrderSide::Buy,
             OrderType::GTC,
-        ));
+        ))
+        .unwrap();
 
         // Both orders should rest on book without matching
         assert_eq!(book.asks.totals[10], 50);
@@ -626,7 +661,8 @@ mod tests {
             10010,
             OrderSide::Sell,
             OrderType::GTC,
-        ));
+        ))
+        .unwrap();
         assert_eq!(book.asks.totals[10], 50);
         assert_eq!(book.best_ask_index, Some(10));
 
@@ -648,7 +684,8 @@ mod tests {
             10010,
             OrderSide::Sell,
             OrderType::GTC,
-        ));
+        ))
+        .unwrap();
 
         // Modify to 100 units @ 10020
         book.modify_order(1, Price(10020), 100);
