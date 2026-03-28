@@ -2,6 +2,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     error::OrderError,
+    market_data::MarketDataEvent,
     order::{Order, OrderSide, OrderType},
     order_pool::OrderPool,
     price::Price,
@@ -13,7 +14,9 @@ pub struct OrderBook {
     pool: OrderPool,
     bids: PriceLevel,
     asks: PriceLevel,
+
     trades: Vec<Trade>,
+    market_data: Vec<MarketDataEvent>,
 
     id_to_index: FxHashMap<u64, usize>,
     id_to_price: FxHashMap<u64, Price>,
@@ -29,6 +32,7 @@ impl OrderBook {
             bids: PriceLevel::new(),
             asks: PriceLevel::new(),
             trades: Vec::with_capacity(capacity),
+            market_data: Vec::with_capacity(capacity),
             id_to_index: FxHashMap::default(),
             id_to_price: FxHashMap::default(),
             best_ask_index: None,
@@ -79,7 +83,11 @@ impl OrderBook {
             OrderSide::Buy => {
                 self.bids.levels[price_idx].unlink(&mut self.pool, node_index);
                 self.bids.sub_qty_at(price_idx, canceled_qty);
-
+                self.market_data.push(MarketDataEvent::LevelUpdated {
+                    price: order_price,
+                    side: order_side,
+                    total_qty: self.bids.totals[price_idx],
+                });
                 if self.bids.levels[price_idx].head.is_none()
                     && self.best_bid_index == Some(price_idx)
                 {
@@ -91,7 +99,11 @@ impl OrderBook {
             OrderSide::Sell => {
                 self.asks.levels[price_idx].unlink(&mut self.pool, node_index);
                 self.asks.sub_qty_at(price_idx, canceled_qty);
-
+                self.market_data.push(MarketDataEvent::LevelUpdated {
+                    price: order_price,
+                    side: order_side,
+                    total_qty: self.asks.totals[price_idx],
+                });
                 if self.asks.levels[price_idx].head.is_none()
                     && self.best_ask_index == Some(price_idx)
                 {
@@ -137,6 +149,7 @@ impl OrderBook {
                 &mut self.pool,
                 order,
                 &mut self.trades,
+                &mut self.market_data,
                 current_level,
                 |taker_price, level_price| taker_price.0 >= level_price.0,
                 |level, idx| level.find_next_non_empty_from(idx + 1),
@@ -147,6 +160,12 @@ impl OrderBook {
             {
                 self.best_ask_index = self.asks.find_next_non_empty_from(best);
             }
+
+            self.market_data.push(MarketDataEvent::BestPriceChanged {
+                best_bid: self.best_bid_index.map(PriceLevel::get_price_from_index),
+                best_ask: self.best_ask_index.map(PriceLevel::get_price_from_index),
+            });
+
             rem
         } else {
             let current_level = self.bids.find_prev_non_empty_from(MAX_LEVEL - 1);
@@ -157,6 +176,7 @@ impl OrderBook {
                 &mut self.pool,
                 order,
                 &mut self.trades,
+                &mut self.market_data,
                 current_level,
                 |taker_price, level_price| taker_price.0 <= level_price.0,
                 |level, idx| {
@@ -173,6 +193,12 @@ impl OrderBook {
             {
                 self.best_bid_index = self.bids.find_prev_non_empty_from(best);
             }
+
+            self.market_data.push(MarketDataEvent::BestPriceChanged {
+                best_bid: self.best_bid_index.map(PriceLevel::get_price_from_index),
+                best_ask: self.best_ask_index.map(PriceLevel::get_price_from_index),
+            });
+
             rem
         }
     }
@@ -214,6 +240,7 @@ impl OrderBook {
         pool: &mut OrderPool,
         taker: &mut Order,
         trades: &mut Vec<Trade>,
+        events: &mut Vec<MarketDataEvent>,
         mut current_level: Option<usize>,
         price_condition: Fcond,
         next_level: Fnext,
@@ -250,6 +277,7 @@ impl OrderBook {
                 }
 
                 let trade_qty = std::cmp::min(remaining_qty, resting_qty);
+
                 trades.push(Trade {
                     taker_order_id: taker.id,
                     maker_order_id: resting_order_id,
@@ -258,11 +286,26 @@ impl OrderBook {
                     taker_side: taker.side,
                     timestamp: taker.timestamp,
                 });
+                events.push(MarketDataEvent::TradeExecuted {
+                    price: level_price,
+                    quantity: trade_qty,
+                    taker_side: taker.side,
+                });
+
                 remaining_qty -= trade_qty;
 
                 let mut_node = unsafe { pool.nodes.get_unchecked_mut(node_idx) };
                 mut_node.order.quantity -= trade_qty;
                 oposite_level.sub_qty_at(level_idx, trade_qty);
+                let opposite_side = match taker.side {
+                    OrderSide::Buy => OrderSide::Sell,
+                    OrderSide::Sell => OrderSide::Buy,
+                };
+                events.push(MarketDataEvent::LevelUpdated {
+                    price: level_price,
+                    side: opposite_side,
+                    total_qty: oposite_level.totals[level_idx],
+                });
 
                 if mut_node.order.quantity == 0 {
                     unsafe {
@@ -308,6 +351,11 @@ impl OrderBook {
             OrderSide::Buy => {
                 self.bids.levels[level].push_back(&mut self.pool, node_index);
                 self.bids.add_qty_at(level, remaining_qty);
+                self.market_data.push(MarketDataEvent::LevelUpdated {
+                    price: order_price,
+                    side: order_side,
+                    total_qty: self.bids.totals[level],
+                });
                 if self.best_bid_index.is_none_or(|best| level > best) {
                     self.best_bid_index = Some(level);
                 }
@@ -315,6 +363,11 @@ impl OrderBook {
             OrderSide::Sell => {
                 self.asks.levels[level].push_back(&mut self.pool, node_index);
                 self.asks.add_qty_at(level, remaining_qty);
+                self.market_data.push(MarketDataEvent::LevelUpdated {
+                    price: order_price,
+                    side: order_side,
+                    total_qty: self.asks.totals[level],
+                });
                 if self.best_ask_index.is_none_or(|best| level < best) {
                     self.best_ask_index = Some(level);
                 }

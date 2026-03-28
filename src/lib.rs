@@ -1,5 +1,6 @@
 pub mod error;
 pub mod exchange;
+pub mod market_data;
 pub mod order;
 pub mod order_book;
 pub mod order_pool;
