@@ -1,18 +1,11 @@
-[package]
-name = "order-book"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = ["crates/*"]
+resolver = "2"
 
-[dependencies]
+[workspace.dependencies]
 rustc-hash = "2.1.1"
 chrono = "0.4.44"
-
-[dev-dependencies]
 criterion = "0.8.2"
-
-[[bench]]
-name = "orderbook_bench"
-harness = false
 
 [profile.release]
 opt-level = 3

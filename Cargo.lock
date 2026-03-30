@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "adapters"
+version = "0.1.0"
+dependencies = [
+ "application",
+ "domain",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -40,6 +48,13 @@ name = "anstyle"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
+
+[[package]]
+name = "application"
+version = "0.1.0"
+dependencies = [
+ "domain",
+]
 
 [[package]]
 name = "autocfg"
@@ -213,6 +228,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
+name = "domain"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "criterion",
+ "rustc-hash",
+]
+
+[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -322,15 +346,6 @@ name = "oorandom"
 version = "11.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
-
-[[package]]
-name = "order-book"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "criterion",
- "rustc-hash",
-]
 
 [[package]]
 name = "page_size"
