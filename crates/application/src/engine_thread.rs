@@ -11,7 +11,7 @@ pub fn run(rx: Receiver<EngineMessage>) {
 
     while let Ok((cmd, reply)) = rx.recv() {
         let response = match cmd {
-            Command::AddOrder(order) => todo,
+            Command::AddOrder(order) => todo!(),
             Command::CancelOrder { asset_id, order_id } => todo!(),
             Command::ModifyOrder {
                 asset_id,
