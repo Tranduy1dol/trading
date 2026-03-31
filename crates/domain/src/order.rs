@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 use crate::price::Price;
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Deserialize, Serialize)]
 pub enum OrderSide {
     Buy,
     Sell,
