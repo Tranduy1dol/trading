@@ -6,3 +6,9 @@ edition = "2024"
 [dependencies]
 domain = { path = "../domain" }
 application = { path = "../application" }
+actix-web = "4.13.0"
+serde = { version = "1.0.228", features = ["derive"]}
+serde_json = "1.0.149"
+tokio = {version = "1.50.0", features = ["sync"]}
+crossbeam-channel = "0.5.15"
+validator = "0.20.0"
