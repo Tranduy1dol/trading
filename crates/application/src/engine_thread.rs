@@ -11,14 +11,23 @@ pub fn run(rx: Receiver<EngineMessage>) {
 
     while let Ok((cmd, reply)) = rx.recv() {
         let response = match cmd {
-            Command::AddOrder(order) => todo!(),
-            Command::CancelOrder { asset_id, order_id } => todo!(),
+            Command::AddOrder(order) => match exchange.add_order(order) {
+                Ok(trades) => Response::Trades(trades.to_vec()),
+                Err(e) => Response::Error(e),
+            },
+            Command::CancelOrder { asset_id, order_id } => {
+                exchange.cancel_order(asset_id, order_id);
+                Response::Ack
+            }
             Command::ModifyOrder {
                 asset_id,
                 order_id,
                 new_price,
                 new_qty,
-            } => todo!(),
+            } => {
+                exchange.modify_order(asset_id, order_id, new_price, new_qty);
+                Response::Ack
+            }
         };
 
         let _ = reply.send(response);
