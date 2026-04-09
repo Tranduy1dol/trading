@@ -28,11 +28,11 @@ impl Exchange {
     }
 
     pub fn cancel_order(&mut self, asset_id: u64, order_id: u64) -> Result<(), OrderError> {
-        if let Some(book) = self.books.get_mut(&asset_id) {
-            book.cancel_order(order_id)?;
-        }
-
-        Err(OrderError::AssetNotFound)
+        let book = self
+            .books
+            .get_mut(&asset_id)
+            .ok_or(OrderError::AssetNotFound)?;
+        book.cancel_order(order_id)
     }
 
     pub fn modify_order(
@@ -42,10 +42,10 @@ impl Exchange {
         new_price: Price,
         new_qty: u64,
     ) -> Result<(), OrderError> {
-        if let Some(book) = self.books.get_mut(&asset_id) {
-            book.modify_order(order_id, new_price, new_qty)?;
-        }
-
-        Err(OrderError::AssetNotFound)
+        let book = self
+            .books
+            .get_mut(&asset_id)
+            .ok_or(OrderError::AssetNotFound)?;
+        book.modify_order(order_id, new_price, new_qty)
     }
 }
