@@ -1,2 +1,0 @@
-// placeholder
-pub mod rest;

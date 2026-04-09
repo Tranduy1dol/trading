@@ -1,0 +1,10 @@
+[package]
+name = "gateway"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+domain = {path = "../domain"}
+application = {path = "../application"}
+io-uring = "0.7.11"
+libc = "0.2.184"
