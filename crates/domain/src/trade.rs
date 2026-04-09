@@ -1,8 +1,6 @@
-use serde::{Deserialize, Serialize};
-
 use crate::{order::OrderSide, price::Price};
 
-#[derive(Clone, Copy, Deserialize, Serialize)]
+#[derive(Clone, Copy)]
 pub struct Trade {
     pub taker_order_id: u64,
     pub maker_order_id: u64,

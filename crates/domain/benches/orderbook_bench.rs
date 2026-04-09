@@ -71,7 +71,7 @@ fn bench_orderbook(c: &mut Criterion) {
             || setup_warmed_orderbook(100),
             |book| {
                 // ID 1 is the best bid (10499)
-                book.cancel_order(black_box(1));
+                book.cancel_order(black_box(1)).unwrap();
             },
             criterion::BatchSize::SmallInput,
         );

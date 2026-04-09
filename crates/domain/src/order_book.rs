@@ -1,3 +1,5 @@
+use std::vec::Drain;
+
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -63,10 +65,10 @@ impl OrderBook {
         Ok(&self.trades[start..])
     }
 
-    pub fn cancel_order(&mut self, order_id: u64) {
+    pub fn cancel_order(&mut self, order_id: u64) -> Result<(), OrderError> {
         let node_index = match self.id_to_index.get(&order_id) {
             Some(&idx) => idx,
-            None => return,
+            None => return Err(OrderError::OrderNotFound),
         };
         let order_price = *self.id_to_price.get(&order_id).unwrap();
 
@@ -76,7 +78,7 @@ impl OrderBook {
 
         let price_idx = match PriceLevel::get_index_from_price(order_price) {
             Some(idx) => idx,
-            None => return,
+            None => return Err(OrderError::PriceOutOfRange),
         };
 
         match order_side {
@@ -115,12 +117,19 @@ impl OrderBook {
         self.pool.deallocate(node_index);
         self.id_to_index.remove(&order_id);
         self.id_to_price.remove(&order_id);
+
+        Ok(())
     }
 
-    pub fn modify_order(&mut self, order_id: u64, new_price: Price, new_qty: u64) {
+    pub fn modify_order(
+        &mut self,
+        order_id: u64,
+        new_price: Price,
+        new_qty: u64,
+    ) -> Result<(), OrderError> {
         let node_index = match self.id_to_index.get(&order_id) {
             Some(&idx) => idx,
-            None => return,
+            None => return Err(OrderError::PriceOutOfRange),
         };
 
         let node = &self.pool.nodes[node_index];
@@ -135,8 +144,10 @@ impl OrderBook {
             timestamp: node.order.timestamp,
         };
 
-        self.cancel_order(order_id);
+        self.cancel_order(order_id)?;
         self.insert_maker(order);
+
+        Ok(())
     }
 
     fn match_order(&mut self, order: &mut Order) -> u64 {
@@ -201,6 +212,10 @@ impl OrderBook {
 
             rem
         }
+    }
+
+    pub fn drain_market_data(&mut self) -> Drain<'_, MarketDataEvent> {
+        self.market_data.drain(..)
     }
 
     fn check_available(&self, order: &Order) -> i64 {
@@ -719,7 +734,7 @@ mod tests {
         assert_eq!(book.asks.totals[10], 50);
         assert_eq!(book.best_ask_index, Some(10));
 
-        book.cancel_order(1);
+        book.cancel_order(1).unwrap();
 
         assert_eq!(book.asks.totals[10], 0);
         assert_eq!(book.best_ask_index, None);
@@ -741,7 +756,7 @@ mod tests {
         .unwrap();
 
         // Modify to 100 units @ 10020
-        book.modify_order(1, Price(10020), 100);
+        book.modify_order(1, Price(10020), 100).unwrap();
 
         assert_eq!(book.asks.totals[10], 0);
         assert_eq!(book.asks.totals[20], 100);

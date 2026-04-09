@@ -615,7 +615,6 @@ dependencies = [
  "chrono",
  "criterion",
  "rustc-hash",
- "serde",
 ]
 
 [[package]]
