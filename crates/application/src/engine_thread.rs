@@ -1,35 +1,52 @@
-use crossbeam_channel::Receiver;
 use domain::exchange::Exchange;
-use tokio::sync::oneshot;
 
 use crate::{command::Command, response::Response};
 
-pub type EngineMessage = (Command, oneshot::Sender<Response>);
-
-pub fn run(rx: Receiver<EngineMessage>) {
-    let mut exchange = Exchange::new(1_000_000);
-
-    while let Ok((cmd, reply)) = rx.recv() {
-        let response = match cmd {
-            Command::AddOrder(order) => match exchange.add_order(order) {
-                Ok(trades) => Response::Trades(trades.to_vec()),
-                Err(e) => Response::Error(e),
+pub fn process(exchange: &mut Exchange, seq: &mut u64, cmd: Command) -> Response {
+    *seq += 1;
+    match cmd {
+        Command::AddOrder { client_seq, order } => match exchange.add_order(order) {
+            Ok(trades) => Response::Fills {
+                engine_seq: *seq,
+                trades: trades.to_vec(),
             },
-            Command::CancelOrder { asset_id, order_id } => {
-                exchange.cancel_order(asset_id, order_id);
-                Response::Ack
-            }
-            Command::ModifyOrder {
-                asset_id,
-                order_id,
-                new_price,
-                new_qty,
-            } => {
-                exchange.modify_order(asset_id, order_id, new_price, new_qty);
-                Response::Ack
-            }
-        };
-
-        let _ = reply.send(response);
+            Err(e) => Response::Reject {
+                engine_seq: *seq,
+                client_seq,
+                reason: e,
+            },
+        },
+        Command::CancelOrder {
+            client_seq,
+            asset_id,
+            order_id,
+        } => match exchange.cancel_order(asset_id, order_id) {
+            Ok(()) => Response::Ack {
+                engine_seq: *seq,
+                client_seq,
+            },
+            Err(e) => Response::Reject {
+                engine_seq: *seq,
+                client_seq,
+                reason: e,
+            },
+        },
+        Command::ModifyOrder {
+            client_seq,
+            asset_id,
+            order_id,
+            new_price,
+            new_qty,
+        } => match exchange.modify_order(asset_id, order_id, new_price, new_qty) {
+            Ok(()) => Response::Ack {
+                engine_seq: *seq,
+                client_seq,
+            },
+            Err(e) => Response::Reject {
+                engine_seq: *seq,
+                client_seq,
+                reason: e,
+            },
+        },
     }
 }
