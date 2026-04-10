@@ -6,10 +6,35 @@ pub enum OrderSide {
     Sell,
 }
 
+impl TryFrom<u8> for OrderSide {
+    type Error = String;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(OrderSide::Buy),
+            1 => Ok(OrderSide::Sell),
+            _ => Err("invalid order side".to_string()),
+        }
+    }
+}
+
 pub enum OrderType {
     GTC,
     IOC,
     FOK,
+}
+
+impl TryFrom<u8> for OrderType {
+    type Error = String;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(OrderType::GTC),
+            1 => Ok(OrderType::IOC),
+            2 => Ok(OrderType::FOK),
+            _ => Err("invalid order type".to_string()),
+        }
+    }
 }
 
 pub struct Order {
