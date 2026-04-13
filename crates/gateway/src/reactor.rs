@@ -11,14 +11,16 @@ use io_uring::{IoUring, opcode, types};
 
 use crate::{
     codec::{decode_command, encode_response},
+    journal::Journal,
     session::Session,
 };
 
 const OP_ACCEPT: u8 = 0;
 const OP_READ: u8 = 1;
 const OP_WRITE: u8 = 2;
+const OP_JOURNAL_WRITE: u8 = 3;
 
-pub fn run(addr: &str) {
+pub fn run(addr: &str, journal_path: &str) {
     pin_to_core(0);
     let listener = TcpListener::bind(addr).expect("failed to bind");
     listener
@@ -41,6 +43,28 @@ pub fn run(addr: &str) {
     let mut exchange = Exchange::new(1_000_000);
     let mut engine_seq = 0u64;
     let mut write_bufs: HashMap<i32, Vec<u8>> = HashMap::with_capacity(1_000_000);
+    let mut journal_writes: HashMap<u64, Vec<u8>> = HashMap::with_capacity(1_000_000);
+    let mut journal_write_id = 0u64;
+
+    println!("replay journal from {}", journal_path);
+    let frames = Journal::read_all_frames(journal_path).unwrap();
+    let mut replayed = 0;
+    for frame in frames {
+        let msg_type = frame[4];
+        let payload = &frame[5..];
+
+        if let Some(cmd) = decode_command(msg_type, payload) {
+            let _ = process(&mut exchange, &mut engine_seq, cmd);
+            replayed += 1;
+        }
+    }
+    println!(
+        "replayed {} commands. current engine_seq {}",
+        replayed, engine_seq
+    );
+
+    let journal = Journal::open(journal_path).unwrap();
+    let journal_fd = journal.fd;
 
     submit_accept(&mut ring, listener_fd);
 
@@ -93,12 +117,35 @@ pub fn run(addr: &str) {
                     let write_buf = write_bufs.entry(fd).or_default();
                     write_buf.clear();
 
+                    let mut pending_journal_data = Vec::new();
+
                     while let Some((msg_type, payload)) = session.try_parse_frame() {
                         if let Some(cmd) = decode_command(msg_type, payload) {
+                            let frame_len = 5 + payload.len();
+                            let full_frame = &session.read_buf[0..frame_len];
                             let response = process(&mut exchange, &mut engine_seq, cmd);
                             encode_response(&response, write_buf);
+
+                            pending_journal_data.extend_from_slice(full_frame);
                         }
                         session.consume_frame();
+                    }
+
+                    if !pending_journal_data.is_empty() {
+                        journal_write_id += 1;
+                        let id = journal_write_id;
+                        let ptr = pending_journal_data.as_ptr();
+                        let len = pending_journal_data.len() as u32;
+                        journal_writes.insert(id, pending_journal_data);
+                        
+                        let write = opcode::Write::new(types::Fd(journal_fd), ptr, len)
+                            .offset(0xFFFFFFFFFFFFFFFF)
+                            .build()
+                            // Store the unique ID in the FD slot of the token
+                            .user_data(encode_token(id as i32, OP_JOURNAL_WRITE));
+                        unsafe {
+                            ring.submission().push(&write).expect("sq full");
+                        }
                     }
 
                     // Only submit write if there's data; otherwise go straight to next read
@@ -129,6 +176,10 @@ pub fn run(addr: &str) {
                         write_bufs.remove(&fd);
                         submit_read(&mut ring, &sessions, fd);
                     }
+                }
+                OP_JOURNAL_WRITE => {
+                    let id = fd as u64; // We encoded the journal_write_id into the fd slot
+                    journal_writes.remove(&id);
                 }
                 _ => {}
             }
@@ -183,6 +234,8 @@ fn submit_write(ring: &mut IoUring, write_bufs: &HashMap<i32, Vec<u8>>, fd: i32)
         ring.submission().push(&write).expect("sq_full");
     }
 }
+
+
 
 fn encode_token(fd: i32, op: u8) -> u64 {
     ((fd as u64) << 8) | (op as u64)

@@ -3,8 +3,9 @@ use std::net::TcpStream;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use gateway::protocol::*;
+use tempfile::NamedTempFile;
 
 // ─── frame helper ─────────────────────────────────────────
 
@@ -29,7 +30,9 @@ fn read_fill(stream: &mut TcpStream, read_buf: &mut [u8]) {
 
 fn start_server() {
     thread::spawn(|| {
-        gateway::reactor::run("127.0.0.1:19999");
+        let temp = NamedTempFile::new().unwrap();
+        let path = temp.path().to_str().unwrap();
+        gateway::reactor::run("127.0.0.1:19999", path);
     });
     // Wait for the server to start, especially binding the port and pinning to a core
     thread::sleep(Duration::from_millis(500));

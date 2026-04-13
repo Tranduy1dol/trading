@@ -1,5 +1,5 @@
 fn main() {
     let addr = "0.0.0.0:9999";
-    println!("Trading engine starting on {}", addr);
-    gateway::reactor::run(addr);
+    let journal_path = "journal.dat";
+    gateway::reactor::run(addr, journal_path);
 }
