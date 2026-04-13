@@ -46,10 +46,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install tombi
-        run: cargo install tombi-cli
       - name: Check TOML formatting
-        run: tombi check
+        run: pipx run tombi format --check
 
   clippy:
     name: Clippy
@@ -79,3 +77,47 @@ jobs:
           files: ./cobertura.xml
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  benchmark-and-update-readme:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    name: Run Benchmarks and Update README
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - name: Run Gateway Benchmark
+        run: |
+          echo "### Latest CI Benchmark Run" > bench_output.md
+          echo "\`\`\`text" >> bench_output.md
+          cargo bench -p gateway --bench latency_bench | sed -r 's/\x1B\[[0-9;]*[mK]//g' >> bench_output.md
+          echo "\`\`\`" >> bench_output.md
+
+      - name: Swap into README
+        run: |
+          python3 -c "
+          import re
+          with open('README.md', 'r') as f:
+            readme = f.read()
+          with open('bench_output.md', 'r') as f:
+            bench = f.read()
+            
+          new_readme = re.sub(
+            r'<!-- BENCH_START -->.*?<!-- BENCH_END -->', 
+            f'<!-- BENCH_START -->\n{bench}\n<!-- BENCH_END -->', 
+            readme, 
+            flags=re.DOTALL
+          )
+          with open('README.md', 'w') as f:
+            f.write(new_readme)
+          "
+
+      - name: Commit & Push Changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "docs(bench): auto-update benchmark results in README"
+          file_pattern: "README.md"
