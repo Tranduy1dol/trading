@@ -92,23 +92,33 @@ jobs:
 
       - name: Run Gateway Benchmark
         run: |
-          echo "### Latest CI Benchmark Run" > bench_output.md
-          echo "\`\`\`text" >> bench_output.md
-          cargo bench --workspace | sed -r 's/\x1B\[[0-9;]*[mK]//g' >> bench_output.md
-          echo "\`\`\`" >> bench_output.md
+          taskset -c 0 cargo bench --workspace | sed -r 's/\x1B\[[0-9;]*[mK]//g' > bench_output.md
 
       - name: Swap into README
         run: |
           python3 -c "
           import re
+          with open('bench_output.md', 'r') as f:
+            lines = f.readlines()
+            
+          table = '| Benchmark Operation | Median Time |\n|---|---|\n'
+          for i, line in enumerate(lines):
+              line = line.strip()
+              if line.startswith('OrderBook_100Level/') or line.startswith('wire_to_wire/'):
+                  if i + 1 < len(lines) and 'time:' in lines[i+1]:
+                      m = re.search(r'\[(.*?)\]', lines[i+1])
+                      if m:
+                          parts = m.group(1).split()
+                          if len(parts) >= 4:
+                              mid_time = f'{parts[2]} {parts[3]}'
+                              table += f'| \`{line}\` | **{mid_time}** |\n'
+
           with open('README.md', 'r') as f:
             readme = f.read()
-          with open('bench_output.md', 'r') as f:
-            bench = f.read()
             
           new_readme = re.sub(
             r'<!-- BENCH_START -->.*?<!-- BENCH_END -->', 
-            f'<!-- BENCH_START -->\n{bench}\n<!-- BENCH_END -->', 
+            f'<!-- BENCH_START -->\n{table}<!-- BENCH_END -->', 
             readme, 
             flags=re.DOTALL
           )
