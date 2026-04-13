@@ -1,21 +1,21 @@
 [workspace]
-members = ["crates/*"]
 resolver = "2"
+members = ["crates/*"]
 
 [workspace.dependencies]
-rustc-hash = "2.1.1"
 chrono = "0.4.44"
 criterion = "0.8.2"
-
-[profile.release]
-opt-level = 3
-lto = "fat"
-codegen-units = 1
-panic = "abort"
-debug = true
+rustc-hash = "2.1.1"
 
 [profile.bench]
 opt-level = 3
+debug = true
 lto = "fat"
 codegen-units = 1
+
+[profile.release]
+opt-level = 3
 debug = true
+lto = "fat"
+panic = "abort"
+codegen-units = 1

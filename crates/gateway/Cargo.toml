@@ -3,16 +3,16 @@ name = "gateway"
 version = "0.1.0"
 edition = "2024"
 
+[[bench]]
+harness = false
+name = "latency_bench"
+
 [dependencies]
-domain = {path = "../domain"}
-application = {path = "../application"}
+application = { path = "../application" }
+domain = { path = "../domain" }
 io-uring = "0.7.11"
 libc = "0.2.184"
 
 [dev-dependencies]
 criterion = { workspace = true }
 tempfile = "3.27.0"
-
-[[bench]]
-name = "latency_bench"
-harness = false

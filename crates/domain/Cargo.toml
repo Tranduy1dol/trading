@@ -3,13 +3,13 @@ name = "domain"
 version = "0.1.0"
 edition = "2024"
 
+[[bench]]
+harness = false
+name = "orderbook_bench"
+
 [dependencies]
-rustc-hash = { workspace = true }
 chrono = { workspace = true }
+rustc-hash = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
-
-[[bench]]
-name = "orderbook_bench"
-harness = false
