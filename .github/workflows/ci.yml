@@ -94,7 +94,7 @@ jobs:
         run: |
           echo "### Latest CI Benchmark Run" > bench_output.md
           echo "\`\`\`text" >> bench_output.md
-          cargo bench -p gateway --bench latency_bench | sed -r 's/\x1B\[[0-9;]*[mK]//g' >> bench_output.md
+          cargo bench --workspace | sed -r 's/\x1B\[[0-9;]*[mK]//g' >> bench_output.md
           echo "\`\`\`" >> bench_output.md
 
       - name: Swap into README

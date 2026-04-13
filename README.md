@@ -1,23 +1,22 @@
 [![codecov](https://codecov.io/gh/Tranduy1dol/trading/graph/badge.svg?token=0EH5wOkx45)](https://codecov.io/gh/Tranduy1dol/trading)
 
-# Benchmarks (Criterion)
+# Performance Benchmarks
 
-The benchmark sets up an initial cache-warmed order book state containing **100 price levels** on the Buy side and **100 price levels** on the Sell side.
+### 1. What is Being Benchmarked?
+The engine uses `criterion` to measure performance across two critical execution layers:
+*   **Core Domain (In-Memory)**: Measures raw data structure speeds for placing `Maker` orders, executing `Taker` cross-matches, and handling `Cancel` operations directly in the L3 order book.
+*   **Wire-to-Wire Latency**: Measures the full asynchronous TCP round-trip lifecycle (`client TCP write` → `io_uring read` → `decode` → `match` → `encode` → `io_uring write` → `client TCP read`).
 
-Using `cargo bench` isolated on a single physical CPU core, the results consistently achieve **sub-microsecond speeds per core action**.
+### 2. How the Benchmarks Work
+*   **Domain**: We pre-allocate an initial cache-warmed order book state containing 100 deep price levels on both the Buy and Sell sides to simulate realistic traversal overhead.
+*   **Gateway**: Pings structured `NewOrderMsg` memory blocks over `TCP_NODELAY` loopback sockets, tracking the exact `Instant::now()` until the corresponding `FillMsg` is read from the socket.
 
-| Operation | Time | Description |
-|---|---|---|
-| **Add Taker Order (IOC)** | **~402 ns** | Taker IOC sweeping against the best matching ask level, computing matches and tracking volumes |
-| **Add Maker Order (GTC)** | **~191 ns** | Inserting a new passive order deep into the book, allocating from the pool, and updating the hash maps |
-| **Cancel Best Bid** | **~58 ns** | O(1) hashmap lookup + double-linked list unlink + O(1) hardware bitmap invalidation to find the next best bid! |
-
-Reproduce locally with core-pinning to isolate OS noise (e.g. Core 2):
+To reproduce identical results locally (with hardware core-pinning enabled to isolate OS scheduler noise):
 ```bash
 taskset -c 2 cargo bench
 ```
 
-## Setup & Testing
-This project integrates directly into GitHub Actions with Continuous Benchmarking.
+### 3. Continuous Integration Results
+These are the live benchmark results generated automatically by the latest GitHub Actions CI run:
 <!-- BENCH_START -->
 <!-- BENCH_END -->
