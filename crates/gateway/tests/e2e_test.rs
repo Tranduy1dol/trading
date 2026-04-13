@@ -14,6 +14,9 @@ use std::thread;
 use std::time::Duration;
 
 use gateway::protocol::*;
+use tempfile::NamedTempFile;
+
+use gateway::protocol::*;
 
 // ─── helpers ──────────────────────────────────────────────
 
@@ -172,23 +175,28 @@ fn test_cancel_existing(stream: &mut TcpStream) {
     println!("  ✓ Cancel existing order works!\n");
 }
 
-fn main() {
-    let addr = "127.0.0.1:9999";
-    println!("Connecting to {}...\n", addr);
+#[test]
+fn test_end_to_end_pipeline() {
+    let addr = "127.0.0.1:19998";
 
-    let mut stream = TcpStream::connect(addr)
-        .expect("Failed to connect. Is the engine running? Start it with: cargo run -p gateway");
+    // Spawn the gateway reactor in the background
+    thread::spawn(move || {
+        let temp = NamedTempFile::new().unwrap();
+        let path = temp.path().to_str().unwrap().to_string();
+        gateway::reactor::run(addr, &path);
+    });
 
-    // Set a read timeout so we don't hang forever on bugs
+    // Wait for the reactor to bind the port
+    thread::sleep(Duration::from_millis(500));
+
+    // Connect to the engine
+    let mut stream = TcpStream::connect(addr).expect("Failed to connect to background reactor");
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
 
+    // Run the pipeline tests sequentially
     test_order_matching(&mut stream);
     test_cancel_nonexistent(&mut stream);
     test_cancel_existing(&mut stream);
-
-    println!("═══════════════════════════════════");
-    println!("  All tests passed!");
-    println!("═══════════════════════════════════");
 }

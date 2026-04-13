@@ -137,7 +137,7 @@ pub fn run(addr: &str, journal_path: &str) {
                         let ptr = pending_journal_data.as_ptr();
                         let len = pending_journal_data.len() as u32;
                         journal_writes.insert(id, pending_journal_data);
-                        
+
                         let write = opcode::Write::new(types::Fd(journal_fd), ptr, len)
                             .offset(0xFFFFFFFFFFFFFFFF)
                             .build()
@@ -234,8 +234,6 @@ fn submit_write(ring: &mut IoUring, write_bufs: &HashMap<i32, Vec<u8>>, fd: i32)
         ring.submission().push(&write).expect("sq_full");
     }
 }
-
-
 
 fn encode_token(fd: i32, op: u8) -> u64 {
     ((fd as u64) << 8) | (op as u64)

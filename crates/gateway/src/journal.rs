@@ -29,6 +29,7 @@ impl Journal {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(path)?;
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer)?;
