@@ -8,3 +8,10 @@ domain = {path = "../domain"}
 application = {path = "../application"}
 io-uring = "0.7.11"
 libc = "0.2.184"
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "latency_bench"
+harness = false

@@ -309,8 +309,7 @@ mod tests {
         assert_eq!(buf[4], MSG_ACK);
 
         // Decode the AckMsg back
-        let msg: AckMsg =
-            unsafe { ptr::read_unaligned(buf[5..].as_ptr() as *const AckMsg) };
+        let msg: AckMsg = unsafe { ptr::read_unaligned(buf[5..].as_ptr() as *const AckMsg) };
         assert_eq!({ msg.client_seq }, 42);
         assert_eq!({ msg.engine_seq }, 1001);
     }
@@ -339,8 +338,7 @@ mod tests {
         assert_eq!(buf[4], MSG_FILL);
         assert_eq!(buf.len(), 4 + len); // exactly one frame
 
-        let msg: FillMsg =
-            unsafe { ptr::read_unaligned(buf[5..].as_ptr() as *const FillMsg) };
+        let msg: FillMsg = unsafe { ptr::read_unaligned(buf[5..].as_ptr() as *const FillMsg) };
         assert_eq!({ msg.engine_seq }, 500);
         assert_eq!({ msg.taker_order_id }, 10);
         assert_eq!({ msg.maker_order_id }, 20);
@@ -419,8 +417,7 @@ mod tests {
         encode_response(&response, &mut buf);
 
         assert_eq!(buf[4], MSG_REJECT);
-        let msg: RejectMsg =
-            unsafe { ptr::read_unaligned(buf[5..].as_ptr() as *const RejectMsg) };
+        let msg: RejectMsg = unsafe { ptr::read_unaligned(buf[5..].as_ptr() as *const RejectMsg) };
         assert_eq!({ msg.engine_seq }, 999);
         assert_eq!({ msg.client_seq }, 5);
         assert_eq!({ msg.reason }, 3); // OrderNotFound = 3
@@ -502,14 +499,22 @@ mod tests {
 
         // Verify
         match cmd1 {
-            Command::CancelOrder { client_seq, order_id, .. } => {
+            Command::CancelOrder {
+                client_seq,
+                order_id,
+                ..
+            } => {
                 assert_eq!(client_seq, 1);
                 assert_eq!(order_id, 10);
             }
             _ => panic!("expected CancelOrder"),
         }
         match cmd2 {
-            Command::CancelOrder { client_seq, order_id, .. } => {
+            Command::CancelOrder {
+                client_seq,
+                order_id,
+                ..
+            } => {
                 assert_eq!(client_seq, 2);
                 assert_eq!(order_id, 20);
             }
@@ -547,12 +552,12 @@ mod tests {
     #[test]
     fn test_protocol_struct_sizes() {
         // Ensure packed structs have no padding
-        assert_eq!(size_of::<FrameHeader>(), 5);    // 4 + 1
-        assert_eq!(size_of::<NewOrderMsg>(), 50);    // 8*6 + 1 + 1
+        assert_eq!(size_of::<FrameHeader>(), 5); // 4 + 1
+        assert_eq!(size_of::<NewOrderMsg>(), 50); // 8*6 + 1 + 1
         assert_eq!(size_of::<CancelOrderMsg>(), 24); // 8*3
         assert_eq!(size_of::<ModifyOrderMsg>(), 40); // 8*5
-        assert_eq!(size_of::<AckMsg>(), 16);         // 8*2
-        assert_eq!(size_of::<FillMsg>(), 49);        // 8*5 + 1 + 8
-        assert_eq!(size_of::<RejectMsg>(), 17);      // 8*2 + 1
+        assert_eq!(size_of::<AckMsg>(), 16); // 8*2
+        assert_eq!(size_of::<FillMsg>(), 49); // 8*5 + 1 + 8
+        assert_eq!(size_of::<RejectMsg>(), 17); // 8*2 + 1
     }
 }

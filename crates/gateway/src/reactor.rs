@@ -19,11 +19,22 @@ const OP_READ: u8 = 1;
 const OP_WRITE: u8 = 2;
 
 pub fn run(addr: &str) {
+    pin_to_core(0);
     let listener = TcpListener::bind(addr).expect("failed to bind");
     listener
         .set_nonblocking(true)
         .expect("failed to set nonblocking");
     let listener_fd = listener.as_raw_fd();
+    unsafe {
+        let one = 1 as libc::c_int;
+        libc::setsockopt(
+            listener_fd,
+            libc::IPPROTO_TCP,
+            libc::TCP_NODELAY,
+            &one as *const _ as *const libc::c_void,
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        );
+    }
 
     let mut ring = IoUring::new(256).expect("failed to create io_uring");
     let mut sessions: HashMap<i32, Session> = HashMap::with_capacity(1_000_000);
@@ -49,6 +60,18 @@ pub fn run(addr: &str) {
                     }
 
                     let client_fd = result;
+
+                    unsafe {
+                        let one = 1 as libc::c_int;
+                        libc::setsockopt(
+                            client_fd,
+                            libc::IPPROTO_TCP,
+                            libc::TCP_NODELAY,
+                            &one as *const _ as *const libc::c_void,
+                            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+                        );
+                    }
+
                     sessions.insert(client_fd, Session::new(client_fd));
                     submit_read(&mut ring, &sessions, client_fd);
                 }
@@ -96,11 +119,33 @@ pub fn run(addr: &str) {
                         continue;
                     }
 
-                    write_bufs.remove(&fd);
-                    submit_read(&mut ring, &sessions, fd);
+                    let n = result as usize;
+                    let write_buf = write_bufs.get_mut(&fd).unwrap();
+
+                    if n < write_buf.len() {
+                        write_buf.drain(..n);
+                        submit_write(&mut ring, &write_bufs, fd);
+                    } else {
+                        write_bufs.remove(&fd);
+                        submit_read(&mut ring, &sessions, fd);
+                    }
                 }
                 _ => {}
             }
+        }
+    }
+}
+
+fn pin_to_core(core_id: usize) {
+    unsafe {
+        let mut set: libc::cpu_set_t = std::mem::zeroed();
+        libc::CPU_SET(core_id, &mut set);
+        let result = libc::sched_setaffinity(0, size_of::<libc::cpu_set_t>(), &set);
+
+        if result == 0 {
+            println!("pinned to core {}", core_id);
+        } else {
+            eprintln!("failed to pin to core {}", core_id);
         }
     }
 }

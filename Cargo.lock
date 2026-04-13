@@ -251,6 +251,7 @@ name = "gateway"
 version = "0.1.0"
 dependencies = [
  "application",
+ "criterion",
  "domain",
  "io-uring",
  "libc",
