@@ -39,12 +39,16 @@ fn send_msg<T: Sized>(stream: &mut TcpStream, msg_type: u8, msg: &T) {
 fn read_response(stream: &mut TcpStream) -> (u8, Vec<u8>) {
     // Read the 4-byte length prefix
     let mut len_buf = [0u8; 4];
-    stream.read_exact(&mut len_buf).expect("failed to read length");
+    stream
+        .read_exact(&mut len_buf)
+        .expect("failed to read length");
     let len = u32::from_le_bytes(len_buf) as usize;
 
     // Read the type + payload
     let mut payload = vec![0u8; len];
-    stream.read_exact(&mut payload).expect("failed to read payload");
+    stream
+        .read_exact(&mut payload)
+        .expect("failed to read payload");
 
     let msg_type = payload[0];
     let body = payload[1..].to_vec();
@@ -172,9 +176,8 @@ fn main() {
     let addr = "127.0.0.1:9999";
     println!("Connecting to {}...\n", addr);
 
-    let mut stream = TcpStream::connect(addr).expect(
-        "Failed to connect. Is the engine running? Start it with: cargo run -p gateway",
-    );
+    let mut stream = TcpStream::connect(addr)
+        .expect("Failed to connect. Is the engine running? Start it with: cargo run -p gateway");
 
     // Set a read timeout so we don't hang forever on bugs
     stream
