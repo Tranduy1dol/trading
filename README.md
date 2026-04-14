@@ -19,11 +19,5 @@ taskset -c 2 cargo bench
 ### 3. Continuous Integration Results
 These are the live benchmark results generated automatically by the latest GitHub Actions CI run:
 <!-- BENCH_START -->
-| Benchmark Operation | Median Time |
-|---|---|
-| `OrderBook_100Level/add_taker_order_ioc` | **241.21 ns** |
-| `OrderBook_100Level/add_maker_order` | **281.13 ns** |
-| `OrderBook_100Level/cancel_best_bid` | **149.62 ns** |
-| `wire_to_wire/order_match_roundtrip` | **32.300 µs** |
-| `wire_to_wire/cancel_reject_roundtrip` | **31.109 µs** |
+
 <!-- BENCH_END -->
