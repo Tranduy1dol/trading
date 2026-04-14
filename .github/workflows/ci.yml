@@ -82,25 +82,33 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     name: Run Benchmarks and Update README
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
       - uses: dtolnay/rust-toolchain@nightly
 
-      - name: Run Gateway Benchmark
+      - name: Run Domain Benchmark
         run: |
-          taskset -c 0 cargo bench --workspace | sed -r 's/\x1B\[[0-9;]*[mK]//g' > bench_output.md
+          taskset -c 0 cargo bench -p domain 2>&1 | sed -r 's/\x1B\[[0-9;]*[mK]//g' > bench_output.md
+
+      - name: Run Gateway Benchmark
+        continue-on-error: true
+        run: |
+          taskset -c 0 cargo bench -p gateway --bench latency_bench 2>&1 | sed -r 's/\x1B\[[0-9;]*[mK]//g' >> bench_output.md
+
+      - name: Debug bench output
+        run: cat bench_output.md
 
       - name: Swap into README
         run: |
-          python3 -c "
+          python3 << 'EOF'
           import re
+
           with open('bench_output.md', 'r') as f:
-            lines = f.readlines()
-            
+              lines = f.readlines()
+
           output = '```text\n'
           for i, line in enumerate(lines):
               line_str = line.strip()
@@ -110,29 +118,32 @@ jobs:
                   while i + j < len(lines):
                       next_line = lines[i+j]
                       next_str = next_line.strip()
-                      if next_str.startswith('time:') or next_str.startswith('change:'):
+                      if next_str.startswith('time:') or next_str.startswith('change:') or next_str.startswith('thrpt:'):
                           output += next_line
-                      elif next_str == '' or '/' in next_str:
+                      elif next_str == '' or next_str.startswith('OrderBook_100Level/') or next_str.startswith('wire_to_wire/') or next_str.startswith('Found') or next_str.startswith('Benchmarking'):
                           break
                       j += 1
                   output += '\n'
           output += '```\n'
 
           with open('README.md', 'r') as f:
-            readme = f.read()
-            
+              readme = f.read()
+
           new_readme = re.sub(
-            r'<!-- BENCH_START -->.*?<!-- BENCH_END -->', 
-            f'<!-- BENCH_START -->\n{output}<!-- BENCH_END -->', 
-            readme, 
-            flags=re.DOTALL
+              r'<!-- BENCH_START -->.*?<!-- BENCH_END -->',
+              f'<!-- BENCH_START -->\n{output}<!-- BENCH_END -->',
+              readme,
+              flags=re.DOTALL
           )
           with open('README.md', 'w') as f:
-            f.write(new_readme)
-          "
+              f.write(new_readme)
+
+          print("README updated successfully")
+          EOF
 
       - name: Commit & Push Changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "docs(bench): auto-update benchmark results in README"
           file_pattern: "README.md"
+
