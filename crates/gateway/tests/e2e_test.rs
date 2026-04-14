@@ -1,9 +1,5 @@
 //! End-to-end test client for the trading engine gateway.
 //!
-//! Usage:
-//!   1. Start the engine:  cargo run -p gateway
-//!   2. Run this client:   cargo run -p gateway --example client
-//!
 //! The client sends a maker sell order, then a taker buy order that matches,
 //! and verifies the Fill response comes back with correct data.
 
@@ -15,10 +11,6 @@ use std::time::Duration;
 
 use gateway::protocol::*;
 use tempfile::NamedTempFile;
-
-use gateway::protocol::*;
-
-// ─── helpers ──────────────────────────────────────────────
 
 fn write_frame<T: Sized>(buf: &mut Vec<u8>, msg_type: u8, msg: &T) {
     let payload_size = size_of::<T>();
@@ -57,8 +49,6 @@ fn read_response(stream: &mut TcpStream) -> (u8, Vec<u8>) {
     let body = payload[1..].to_vec();
     (msg_type, body)
 }
-
-// ─── tests ────────────────────────────────────────────────
 
 fn test_order_matching(stream: &mut TcpStream) {
     println!("--- Test: Order Matching ---");

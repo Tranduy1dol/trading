@@ -5,6 +5,7 @@ use std::{
     ptr,
 };
 
+use application::command::Command::{AddOrder, CancelOrder, ModifyOrder};
 use application::engine_thread::process;
 use domain::exchange::Exchange;
 use io_uring::{IoUring, opcode, types};
@@ -12,6 +13,7 @@ use io_uring::{IoUring, opcode, types};
 use crate::{
     codec::{decode_command, encode_response},
     journal::Journal,
+    protocol::{BboUpdateMsg, MSG_BBO_UPDATE},
     session::Session,
 };
 
@@ -110,25 +112,84 @@ pub fn run(addr: &str, journal_path: &str) {
                     }
 
                     let n = result as usize;
-                    let session = sessions.get_mut(&fd).unwrap();
-                    session.read_pos += n;
-
-                    // Accumulate all responses into a single write buffer
-                    let write_buf = write_bufs.entry(fd).or_default();
-                    write_buf.clear();
+                    let mut client_frames = Vec::new();
+                    {
+                        let session = sessions.get_mut(&fd).unwrap();
+                        session.read_pos += n;
+                        while let Some((msg_type, payload)) = session.try_parse_frame() {
+                            let frame_len = 5 + payload.len();
+                            client_frames.push((msg_type, session.read_buf[0..frame_len].to_vec()));
+                            session.consume_frame();
+                        }
+                    }
 
                     let mut pending_journal_data = Vec::new();
 
-                    while let Some((msg_type, payload)) = session.try_parse_frame() {
+                    for (msg_type, full_frame) in client_frames {
+                        let payload = &full_frame[5..];
                         if let Some(cmd) = decode_command(msg_type, payload) {
-                            let frame_len = 5 + payload.len();
-                            let full_frame = &session.read_buf[0..frame_len];
-                            let response = process(&mut exchange, &mut engine_seq, cmd);
-                            encode_response(&response, write_buf);
+                            let asset_id = match &cmd {
+                                AddOrder { order, .. } => order.asset_id,
+                                CancelOrder { asset_id, .. } => *asset_id,
+                                ModifyOrder { asset_id, .. } => *asset_id,
+                            };
 
-                            pending_journal_data.extend_from_slice(full_frame);
+                            let response = process(&mut exchange, &mut engine_seq, cmd);
+
+                            {
+                                let write_buf = write_bufs.entry(fd).or_default();
+                                encode_response(&response, write_buf);
+                            }
+
+                            let events = exchange.drain_market_data(asset_id);
+                            let mut broadcast_buf = Vec::new();
+
+                            for ev in events {
+                                if let domain::market_data::MarketDataEvent::LevelUpdated {
+                                    price,
+                                    side,
+                                    total_qty,
+                                } = ev
+                                {
+                                    let bbo = BboUpdateMsg {
+                                        engine_seq,
+                                        asset_id,
+                                        price: price.0,
+                                        quantity: total_qty,
+                                        side: side as u8,
+                                    };
+
+                                    let payload_size = std::mem::size_of::<BboUpdateMsg>();
+                                    let len = (1 + payload_size) as u32;
+
+                                    broadcast_buf.extend_from_slice(&len.to_le_bytes());
+                                    broadcast_buf.push(MSG_BBO_UPDATE);
+
+                                    let ptr = &bbo as *const _ as *const u8;
+                                    unsafe {
+                                        broadcast_buf.extend_from_slice(
+                                            std::slice::from_raw_parts(ptr, payload_size),
+                                        );
+                                    }
+                                }
+                            }
+
+                            if !broadcast_buf.is_empty() {
+                                let keys: Vec<i32> = sessions.keys().copied().collect();
+                                for active_fd in keys {
+                                    {
+                                        let client_write_buf =
+                                            write_bufs.entry(active_fd).or_default();
+                                        client_write_buf.extend_from_slice(&broadcast_buf);
+                                    }
+                                    if active_fd != fd {
+                                        submit_write(&mut ring, &write_bufs, active_fd);
+                                    }
+                                }
+                            }
+
+                            pending_journal_data.extend_from_slice(&full_frame);
                         }
-                        session.consume_frame();
                     }
 
                     if !pending_journal_data.is_empty() {
@@ -141,18 +202,16 @@ pub fn run(addr: &str, journal_path: &str) {
                         let write = opcode::Write::new(types::Fd(journal_fd), ptr, len)
                             .offset(0xFFFFFFFFFFFFFFFF)
                             .build()
-                            // Store the unique ID in the FD slot of the token
                             .user_data(encode_token(id as i32, OP_JOURNAL_WRITE));
                         unsafe {
                             ring.submission().push(&write).expect("sq full");
                         }
                     }
 
-                    // Only submit write if there's data; otherwise go straight to next read
-                    if !write_buf.is_empty() {
+                    let needs_write = write_bufs.get(&fd).map(|b| !b.is_empty()).unwrap_or(false);
+                    if needs_write {
                         submit_write(&mut ring, &write_bufs, fd);
                     } else {
-                        write_bufs.remove(&fd);
                         submit_read(&mut ring, &sessions, fd);
                     }
                 }
@@ -178,7 +237,7 @@ pub fn run(addr: &str, journal_path: &str) {
                     }
                 }
                 OP_JOURNAL_WRITE => {
-                    let id = fd as u64; // We encoded the journal_write_id into the fd slot
+                    let id = fd as u64;
                     journal_writes.remove(&id);
                 }
                 _ => {}

@@ -1,6 +1,9 @@
 use rustc_hash::FxHashMap;
 
-use crate::{error::OrderError, order::Order, order_book::OrderBook, price::Price, trade::Trade};
+use crate::{
+    error::OrderError, market_data::MarketDataEvent, order::Order, order_book::OrderBook,
+    price::Price, trade::Trade,
+};
 
 pub struct Exchange {
     books: FxHashMap<u64, OrderBook>,
@@ -47,5 +50,13 @@ impl Exchange {
             .get_mut(&asset_id)
             .ok_or(OrderError::AssetNotFound)?;
         book.modify_order(order_id, new_price, new_qty)
+    }
+
+    pub fn drain_market_data(&mut self, asset_id: u64) -> Vec<MarketDataEvent> {
+        if let Some(book) = self.books.get_mut(&asset_id) {
+            book.drain_market_data().collect()
+        } else {
+            Vec::new()
+        }
     }
 }

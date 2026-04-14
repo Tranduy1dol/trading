@@ -12,6 +12,7 @@ pub const MSG_MODIFY_ORDER: u8 = 0x03;
 pub const MSG_ACK: u8 = 0x10;
 pub const MSG_FILL: u8 = 0x11;
 pub const MSG_REJECT: u8 = 0x12;
+pub const MSG_BBO_UPDATE: u8 = 0x13;
 
 #[repr(C, packed)]
 pub struct NewOrderMsg {
@@ -63,4 +64,13 @@ pub struct RejectMsg {
     pub client_seq: u64,
     pub engine_seq: u64,
     pub reason: u8,
+}
+
+#[repr(C, packed)]
+pub struct BboUpdateMsg {
+    pub engine_seq: u64,
+    pub asset_id: u64,
+    pub price: u64,
+    pub quantity: u64,
+    pub side: u8,
 }
