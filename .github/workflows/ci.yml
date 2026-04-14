@@ -101,24 +101,29 @@ jobs:
           with open('bench_output.md', 'r') as f:
             lines = f.readlines()
             
-          table = '| Benchmark Operation | Median Time |\n|---|---|\n'
+          output = '```text\n'
           for i, line in enumerate(lines):
-              line = line.strip()
-              if line.startswith('OrderBook_100Level/') or line.startswith('wire_to_wire/'):
-                  if i + 1 < len(lines) and 'time:' in lines[i+1]:
-                      m = re.search(r'\[(.*?)\]', lines[i+1])
-                      if m:
-                          parts = m.group(1).split()
-                          if len(parts) >= 4:
-                              mid_time = f'{parts[2]} {parts[3]}'
-                              table += f'| \`{line}\` | **{mid_time}** |\n'
+              line_str = line.strip()
+              if line_str.startswith('OrderBook_100Level/') or line_str.startswith('wire_to_wire/'):
+                  output += line
+                  j = 1
+                  while i + j < len(lines):
+                      next_line = lines[i+j]
+                      next_str = next_line.strip()
+                      if next_str.startswith('time:') or next_str.startswith('change:'):
+                          output += next_line
+                      elif next_str == '' or '/' in next_str:
+                          break
+                      j += 1
+                  output += '\n'
+          output += '```\n'
 
           with open('README.md', 'r') as f:
             readme = f.read()
             
           new_readme = re.sub(
             r'<!-- BENCH_START -->.*?<!-- BENCH_END -->', 
-            f'<!-- BENCH_START -->\n{table}<!-- BENCH_END -->', 
+            f'<!-- BENCH_START -->\n{output}<!-- BENCH_END -->', 
             readme, 
             flags=re.DOTALL
           )
