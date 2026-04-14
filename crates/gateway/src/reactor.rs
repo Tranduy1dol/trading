@@ -71,18 +71,24 @@ pub fn run(addr: &str, journal_path: &str) {
 
     submit_accept(&mut ring, listener_fd);
 
-    // ─── graceful shutdown via SIGINT / SIGTERM ───────────────
     unsafe {
-        libc::signal(libc::SIGINT, signal_handler as *const () as libc::sighandler_t);
-        libc::signal(libc::SIGTERM, signal_handler as *const () as libc::sighandler_t);
+        libc::signal(
+            libc::SIGINT,
+            signal_handler as *const () as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGTERM,
+            signal_handler as *const () as libc::sighandler_t,
+        );
     }
 
     loop {
         if SHUTDOWN.load(Ordering::Relaxed) {
-            eprintln!("shutdown signal received, draining {} pending journal writes...",
-                journal_writes.len());
+            eprintln!(
+                "shutdown signal received, draining {} pending journal writes...",
+                journal_writes.len()
+            );
 
-            // Drain all inflight journal writes
             while !journal_writes.is_empty() {
                 ring.submit_and_wait(1).expect("submit_and_wait failed");
                 for cqe in ring.completion().collect::<Vec<_>>() {
@@ -93,13 +99,15 @@ pub fn run(addr: &str, journal_path: &str) {
                 }
             }
 
-            // Close all client connections
             for &client_fd in sessions.keys() {
-                unsafe { libc::close(client_fd); }
+                unsafe {
+                    libc::close(client_fd);
+                }
             }
 
-            // Sync the journal to disk
-            unsafe { libc::fsync(journal_fd); }
+            unsafe {
+                libc::fsync(journal_fd);
+            }
 
             eprintln!("shutdown complete. engine_seq={}", engine_seq);
             return;

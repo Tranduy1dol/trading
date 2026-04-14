@@ -324,9 +324,11 @@ fn test_multi_client_broadcast() {
         "Client B: expected Fill after taker match"
     );
     let fill: FillMsg = unsafe { ptr::read_unaligned(fill_body.as_ptr() as *const FillMsg) };
-    println!("  Client B received FILL: price={} qty={}", { fill.price }, {
-        fill.quantity
-    });
+    println!(
+        "  Client B received FILL: price={} qty={}",
+        { fill.price },
+        { fill.quantity }
+    );
     assert_eq!({ fill.price }, 10500);
     assert_eq!({ fill.quantity }, 200);
 
