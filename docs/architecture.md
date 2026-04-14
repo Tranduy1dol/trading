@@ -24,9 +24,9 @@ The matching engine processes an order in ~30ns. The network round-trip dominate
 
 ```
 io_uring completion (~1–2µs)
-  → FlatBuffers decode (~50ns)
+  → decode packed C struct (~50ns)
     → exchange.add_order() (~30ns)
-  → FlatBuffers encode (~50ns)
+  → encode packed C struct (~50ns)
 → io_uring submit (~1–2µs)
 
 Total: ~3–5µs wire-to-wire
@@ -36,7 +36,7 @@ The matching engine never blocks the network loop because it's 50x faster than t
 
 ### Hexagonal Boundaries Survive
 
-The hexagonal pattern doesn't require separate threads — it requires **dependency inversion**. The domain crate still has zero knowledge of `io_uring`, FlatBuffers, or TCP. The boundary is enforced at compile time by Cargo workspace crate dependencies:
+The hexagonal pattern doesn't require separate threads — it requires **dependency inversion**. The domain crate still has zero knowledge of `io_uring`, TCP, or packed structs. The boundary is enforced at compile time by Cargo workspace crate dependencies:
 
 ```
 gateway → application → domain
@@ -58,9 +58,9 @@ graph LR
             RING["Submission/Completion<br/>Queue"]
         end
 
-        subgraph Gateway ["Gateway Layer"]
-            CODEC["FlatBuffers Codec"]
-            SESS["Session Manager<br/>(seq tracking, auth)"]
+        subgraph GW ["Gateway Layer"]
+            CODEC["Binary Codec<br/>(packed C-repr structs)"]
+            SESS["Session Manager<br/>(per-client TCP buffers)"]
         end
 
         subgraph Engine ["Engine (Domain)"]
@@ -69,7 +69,7 @@ graph LR
     end
 
     subgraph Outbound ["Outbound"]
-        MDF["Market Data<br/>Dissemination"]
+        MDF["Market Data<br/>Broadcaster"]
         JRNL["Journal<br/>(append-only WAL)"]
     end
 
@@ -82,9 +82,9 @@ graph LR
     CODEC --> RING
     RING -->|binary frame| CLIENT
 
-    ENG -->|events| MDF
-    ENG -->|events| JRNL
-    MDF -->|binary frame| RING
+    ENG -->|MarketDataEvent| MDF
+    ENG -->|raw frame bytes| JRNL
+    MDF -->|BboUpdate to all fds| RING
 ```
 
 ---
@@ -97,31 +97,30 @@ All messages use length-prefixed binary frames over persistent TCP connections:
 
 ```
 ┌──────────┬──────────┬──────────────────────────────┐
-│ len (4B) │ type (1B)│ FlatBuffers payload (N bytes)│
+│ len (4B) │ type (1B)│ packed C-repr payload (N B)  │
 └──────────┴──────────┴──────────────────────────────┘
 ```
 
 - **len**: `u32` little-endian — total frame size excluding the length field itself
 - **type**: message type discriminant
-- **payload**: FlatBuffers-encoded message body (zero-copy decode)
+- **payload**: `#[repr(C, packed)]` struct — zero-copy, no serialization overhead
 
 ### Message Types
 
 | Direction | Type | Tag | Description |
 |---|---|---|---|
-| Client → Engine | `NewOrder` | `0x01` | Place a new limit order |
-| Client → Engine | `CancelOrder` | `0x02` | Cancel an existing order |
+| Client → Engine | `NewOrder` | `0x01` | Place a new limit order (GTC, IOC, FOK) |
+| Client → Engine | `CancelOrder` | `0x02` | Cancel an existing order by ID |
 | Client → Engine | `ModifyOrder` | `0x03` | Modify price and/or quantity |
 | Engine → Client | `Ack` | `0x10` | Order accepted, engine seq assigned |
 | Engine → Client | `Fill` | `0x11` | Trade execution report |
-| Engine → Client | `Reject` | `0x12` | Order rejected with reason |
-| Engine → All | `MarketData` | `0x20` | BBO update / level change / trade tick |
+| Engine → Client | `Reject` | `0x12` | Order rejected with reason code |
+| Engine → All | `BboUpdate` | `0x13` | Price level updated (broadcast to all clients) |
 
 ### Sequencing
 
 - **Client seq** (`client_seq: u64`): monotonically increasing per session; set by the client
 - **Engine seq** (`engine_seq: u64`): globally monotonic; assigned by the engine to every processed command
-- On reconnect, client sends its last `engine_seq` → engine replays from journal
 
 ---
 
@@ -134,7 +133,7 @@ Pure Rust. **Zero I/O dependencies.** Only `rustc-hash` for the hash map.
 | Module | Responsibility |
 |---|---|
 | `order_book.rs` | Single-asset matching: add, cancel, modify. Returns `&[Trade]`. |
-| `exchange.rs` | Multi-asset router (`asset_id → OrderBook`). All operations return `Result`. |
+| `exchange.rs` | Multi-asset router (`asset_id → OrderBook`). Exposes `drain_market_data()`. |
 | `order_pool.rs` | Zero-alloc memory pool — `Vec<Node>` + free-list index stack |
 | `order_queue.rs` | Intrusive doubly-linked list per price level |
 | `price_level.rs` | `[u64; 16]` bitmap + totals array. O(1) best-price via hardware TZCNT/LZCNT. |
@@ -147,45 +146,32 @@ Pure Rust. **Zero I/O dependencies.** Only `rustc-hash` for the hash map.
 Command/response types and the engine entry point.
 
 ```rust
-pub enum Command {
-    NewOrder { client_seq: u64, order: Order },
-    CancelOrder { client_seq: u64, asset_id: u64, order_id: u64 },
-    ModifyOrder { client_seq: u64, asset_id: u64, order_id: u64, new_price: Price, new_qty: u64 },
-}
-
-pub enum Response {
-    Ack { engine_seq: u64, client_seq: u64 },
-    Fills { engine_seq: u64, trades: Vec<Trade> },
-    Reject { engine_seq: u64, client_seq: u64, reason: OrderError },
-}
-```
-
-In the thread-per-core model, the application layer is a thin function:
-
-```rust
 pub fn process(exchange: &mut Exchange, seq: &mut u64, cmd: Command) -> Response {
     *seq += 1;
     match cmd {
-        Command::NewOrder { client_seq, order } => {
+        Command::AddOrder { client_seq, order } => {
             match exchange.add_order(order) {
                 Ok(trades) => Response::Fills { engine_seq: *seq, trades: trades.to_vec() },
                 Err(e) => Response::Reject { engine_seq: *seq, client_seq, reason: e },
             }
         }
-        // ...
+        // CancelOrder → Ack / Reject
+        // ModifyOrder → Ack / Reject
     }
 }
 ```
 
 ### Gateway (`crates/gateway`)
 
-Owns io_uring reactor, TCP session management, and FlatBuffers codec. This is the **only** crate that knows about networking and serialization.
+Owns io_uring reactor, TCP session management, and binary codec. This is the **only** crate that knows about networking.
 
 | Module | Responsibility |
 |---|---|
-| `reactor.rs` | io_uring event loop — accept, read, write, timer |
-| `session.rs` | Per-client state: buffer, `client_seq` tracking, auth |
-| `codec.rs` | FlatBuffers encode/decode — translates wire bytes ↔ `Command`/`Response` |
+| `reactor.rs` | io_uring event loop — accept, read, write, journal append, signal handling |
+| `session.rs` | Per-client state: read buffer, position tracking |
+| `codec.rs` | Encode/decode — translates wire bytes ↔ `Command`/`Response` |
+| `protocol.rs` | `#[repr(C, packed)]` message struct definitions |
+| `journal.rs` | Write-ahead log — append raw frames, replay on startup |
 
 ---
 
@@ -202,18 +188,18 @@ sequenceDiagram
 
     C->>R: TCP frame [NewOrder, client_seq=42]
     R->>GW: completion event + buffer
-    GW->>GW: FlatBuffers decode → Command
+    GW->>GW: decode packed struct → Command
     GW->>E: process(&mut exchange, cmd)
     E->>E: exchange.add_order(order) → trades
-    E->>GW: Response::Fills { engine_seq=1001 }
-    GW->>GW: FlatBuffers encode → buffer
+    E-->>GW: Response::Fills { engine_seq=1001 }
+    GW->>GW: encode → buffer
     GW->>R: submit write
     R->>C: TCP frame [Fill, engine_seq=1001]
 
     Note over R,E: All steps on the same pinned core
 ```
 
-### Market Data Dissemination
+### Market Data Broadcast (Fan-Out)
 
 ```mermaid
 sequenceDiagram
@@ -223,15 +209,30 @@ sequenceDiagram
     participant C1 as Client 1
     participant C2 as Client 2
 
-    E->>E: order matched → MarketDataEvent::BestPriceChanged
-    E->>GW: event
-    GW->>GW: encode once, reference for all subscribers
-    GW->>R: submit write (client 1 fd)
-    GW->>R: submit write (client 2 fd)
-    R->>C1: TCP frame [MarketData]
-    R->>C2: TCP frame [MarketData]
+    E->>E: order matched → MarketDataEvent::LevelUpdated
+    E->>GW: drain_market_data()
+    GW->>GW: encode BboUpdateMsg once into broadcast_buf
+    GW->>R: append broadcast_buf to ALL client write_bufs
+    R->>C1: TCP frame [BboUpdate]
+    R->>C2: TCP frame [BboUpdate]
 
-    Note over GW: Single encode, multiple sends (zero-copy)
+    Note over GW: Single encode, fan-out to N clients
+```
+
+### Journal / WAL Path
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant R as Reactor
+    participant J as Journal File
+
+    C->>R: TCP frame [NewOrder]
+    R->>R: process command, encode response
+    R->>J: io_uring async append (raw frame bytes)
+    Note over J: offset=0xFFFFFFFF (atomic append)
+
+    Note over R,J: On startup: replay all frames → restore engine state
 ```
 
 ---
@@ -261,56 +262,3 @@ bitmap:   [1 0 1 0 0 ...] ← 16 × u64, hardware TZCNT for best bid, LZCNT for 
 
 - Bitmap gives O(1) best-price discovery — a single `TZCNT` instruction
 - Each queue is an intrusive doubly-linked list → O(1) insert and cancel
-
----
-
-## 7. Performance Design
-
-| Technique | Impact | Location |
-|---|---|---|
-| **io_uring** | Batched async syscalls, no epoll overhead, ~1–2µs per I/O | Gateway reactor |
-| **Thread-per-core** | No cross-thread communication, all hot data in L1/L2 | Architecture-wide |
-| **FlatBuffers** | Zero-copy decode ~50ns (vs JSON ~1–5µs) | Gateway codec |
-| **Single-threaded engine** | No locks, no contention, deterministic ordering | Application layer |
-| **u64 bitmap** | O(1) best-price via hardware TZCNT/LZCNT | `price_level.rs` |
-| **Vec + free-list** | Zero heap allocation during trading | `order_pool.rs` |
-| **Intrusive linked list** | O(1) insert/remove, cache-friendly | `order_queue.rs` |
-| **`unsafe get_unchecked`** | Eliminates bounds checks in matching hot loop | `order_book.rs` |
-| **`target-cpu=native`** | Enables hardware TZCNT/LZCNT instructions | `.cargo/config.toml` |
-| **LTO fat + codegen-units=1** | Maximum cross-crate inlining | `Cargo.toml` |
-
----
-
-## 8. Evolution Roadmap
-
-The architecture is designed to evolve without rewriting the domain:
-
-```
-Current     TCP + tokio (epoll)          ~20–50µs wire-to-wire
-   ↓
-Phase 1     TCP + io_uring               ~3–10µs wire-to-wire
-            FlatBuffers codec
-            Thread-per-core reactor
-   ↓
-Phase 2     AF_XDP (kernel bypass lite)  ~1–3µs wire-to-wire
-            eBPF + XDP in NIC driver
-            Still uses kernel driver
-   ↓
-Phase 3     DPDK (full kernel bypass)    ~0.5–1µs wire-to-wire
-            Userspace TCP stack
-            Dedicated NIC, huge pages
-   ↓
-Phase 4     FPGA NIC                     ~sub-µs
-            Matching logic on hardware
-```
-
-Each phase only replaces the **gateway crate**. The domain and application layers are untouched — that's the payoff of hexagonal architecture.
-
-### Current Priorities
-
-- [x] Domain core — matching engine, order pool, price levels
-- [ ] Application layer — sequenced commands/responses, `Result` returns for all operations
-- [ ] Gateway — io_uring reactor, FlatBuffers codec, TCP session management
-- [ ] Journal — append-only WAL for crash recovery and replay
-- [ ] Market data — wire `MarketDataEvent` from engine → broadcast to subscribers
-- [ ] Admin API — REST endpoints for monitoring (health, metrics, book snapshots)

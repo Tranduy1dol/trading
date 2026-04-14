@@ -14,60 +14,7 @@ A single-threaded, zero-copy trading engine built in Rust, designed for **sub-11
 - 🛑 **Graceful Shutdown** — `SIGINT`/`SIGTERM` signal handling with journal flush and connection teardown
 - 🔒 **Zero-Copy Protocol** — Packed C-repr structs transmitted directly over TCP with no serialization overhead
 
-## Architecture
-
-```mermaid
-graph LR
-    subgraph "Network Layer (io_uring)"
-        C1[Client A] -->|TCP| R[Reactor]
-        C2[Client B] -->|TCP| R
-        C3[Client N] -->|TCP| R
-    end
-
-    subgraph "Gateway Crate"
-        R -->|decode| D[Codec]
-        D -->|Command| E[Engine Thread]
-        E -->|Response| EN[Encoder]
-        EN -->|bytes| R
-        R -->|raw frame| J[Journal / WAL]
-        E -->|MarketDataEvent| B[Broadcaster]
-        B -->|BboUpdate| R
-    end
-
-    subgraph "Application Crate"
-        E -->|add/cancel/modify| EX[Exchange]
-    end
-
-    subgraph "Domain Crate"
-        EX -->|route| OB[OrderBook]
-        OB --> PL[PriceLevel Bitmap]
-        OB --> OP[OrderPool]
-        OB --> OQ[OrderQueue DLL]
-    end
-```
-
-**Data flow**: `Client TCP write` → `io_uring read` → `Decode` → `Engine process` → `Encode` → `io_uring write` → `Client TCP read`
-
-All processing happens on a **single thread pinned to a physical CPU core** (LMAX Disruptor pattern), eliminating all lock contention and context-switch overhead.
-
-## Project Structure
-
-```
-crates/
-├── domain/         # Pure business logic: OrderBook, PriceLevel, Trade, OrderPool
-├── application/    # Engine thread: Command → Exchange → Response mapping
-└── gateway/        # io_uring reactor, binary protocol codec, journal, session management
-    ├── src/
-    │   ├── reactor.rs    # Main io_uring event loop
-    │   ├── codec.rs      # Zero-copy encode/decode
-    │   ├── protocol.rs   # Packed C-repr message structs
-    │   ├── journal.rs    # Write-ahead log (WAL)
-    │   └── session.rs    # Per-client TCP buffer management
-    ├── benches/
-    │   └── latency_bench.rs  # Wire-to-wire Criterion benchmark
-    └── tests/
-        └── e2e_test.rs       # Multi-client integration tests
-```
+> 📐 For a deep dive into the system design, data structures, wire protocol, and data flow diagrams, see **[docs/architecture.md](docs/architecture.md)**.
 
 ## Getting Started
 
@@ -106,25 +53,7 @@ The engine uses `criterion` to measure performance across two critical execution
 ### 3. Continuous Integration Results
 These are the live benchmark results generated automatically by the latest GitHub Actions CI run:
 <!-- BENCH_START -->
-```text
-OrderBook_100Level/add_taker_order_ioc
-                        time:   [217.14 ns 249.32 ns 290.51 ns]
 
-OrderBook_100Level/add_maker_order
-                        time:   [251.66 ns 275.13 ns 299.82 ns]
-
-OrderBook_100Level/cancel_best_bid
-                        time:   [138.06 ns 156.96 ns 180.55 ns]
-
-wire_to_wire/order_match_roundtrip
-                        time:   [90.658 µs 91.256 µs 92.021 µs]
-                        thrpt:  [10.867 Kelem/s 10.958 Kelem/s 11.030 Kelem/s]
-
-wire_to_wire/cancel_reject_roundtrip
-                        time:   [32.129 µs 32.210 µs 32.289 µs]
-                        thrpt:  [30.971 Kelem/s 31.046 Kelem/s 31.125 Kelem/s]
-
-```
 <!-- BENCH_END -->
 
 ## License
