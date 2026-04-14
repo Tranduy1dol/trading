@@ -55,21 +55,21 @@ These are the live benchmark results generated automatically by the latest GitHu
 <!-- BENCH_START -->
 ```text
 OrderBook_100Level/add_taker_order_ioc
-                        time:   [321.63 ns 343.26 ns 362.64 ns]
+                        time:   [270.46 ns 287.34 ns 301.01 ns]
 
 OrderBook_100Level/add_maker_order
-                        time:   [343.72 ns 365.41 ns 387.30 ns]
+                        time:   [272.22 ns 293.84 ns 314.39 ns]
 
 OrderBook_100Level/cancel_best_bid
-                        time:   [178.43 ns 190.49 ns 202.86 ns]
+                        time:   [133.19 ns 141.74 ns 149.15 ns]
 
 wire_to_wire/order_match_roundtrip
-                        time:   [208.60 µs 208.77 µs 208.94 µs]
-                        thrpt:  [4.7862 Kelem/s 4.7899 Kelem/s 4.7939 Kelem/s]
+                        time:   [130.96 µs 131.10 µs 131.28 µs]
+                        thrpt:  [7.6172 Kelem/s 7.6275 Kelem/s 7.6361 Kelem/s]
 
 wire_to_wire/cancel_reject_roundtrip
-                        time:   [32.048 µs 32.144 µs 32.235 µs]
-                        thrpt:  [31.022 Kelem/s 31.110 Kelem/s 31.203 Kelem/s]
+                        time:   [32.135 µs 32.196 µs 32.256 µs]
+                        thrpt:  [31.002 Kelem/s 31.060 Kelem/s 31.119 Kelem/s]
 
 ```
 <!-- BENCH_END -->
