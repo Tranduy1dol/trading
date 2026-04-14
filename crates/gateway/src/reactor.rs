@@ -3,6 +3,7 @@ use std::{
     net::TcpListener,
     os::fd::{AsRawFd, RawFd},
     ptr,
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 use application::command::Command::{AddOrder, CancelOrder, ModifyOrder};
@@ -70,7 +71,39 @@ pub fn run(addr: &str, journal_path: &str) {
 
     submit_accept(&mut ring, listener_fd);
 
+    // ─── graceful shutdown via SIGINT / SIGTERM ───────────────
+    unsafe {
+        libc::signal(libc::SIGINT, signal_handler as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGTERM, signal_handler as *const () as libc::sighandler_t);
+    }
+
     loop {
+        if SHUTDOWN.load(Ordering::Relaxed) {
+            eprintln!("shutdown signal received, draining {} pending journal writes...",
+                journal_writes.len());
+
+            // Drain all inflight journal writes
+            while !journal_writes.is_empty() {
+                ring.submit_and_wait(1).expect("submit_and_wait failed");
+                for cqe in ring.completion().collect::<Vec<_>>() {
+                    let (fd, op) = decode_token(cqe.user_data());
+                    if op == OP_JOURNAL_WRITE {
+                        journal_writes.remove(&(fd as u64));
+                    }
+                }
+            }
+
+            // Close all client connections
+            for &client_fd in sessions.keys() {
+                unsafe { libc::close(client_fd); }
+            }
+
+            // Sync the journal to disk
+            unsafe { libc::fsync(journal_fd); }
+
+            eprintln!("shutdown complete. engine_seq={}", engine_seq);
+            return;
+        }
         ring.submit_and_wait(1).expect("submit_and_wait failed");
         let cqes = ring.completion().collect::<Vec<_>>();
 
@@ -301,3 +334,13 @@ fn encode_token(fd: i32, op: u8) -> u64 {
 fn decode_token(token: u64) -> (i32, u8) {
     ((token >> 8) as i32, (token & 0xFF) as u8)
 }
+
+extern "C" fn signal_handler(_sig: libc::c_int) {
+    // SAFETY: AtomicBool::store is async-signal-safe
+    unsafe {
+        let shutdown = &*std::ptr::addr_of!(SHUTDOWN);
+        shutdown.store(true, Ordering::Relaxed);
+    }
+}
+
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);

@@ -1,6 +1,98 @@
 [![codecov](https://codecov.io/gh/Tranduy1dol/trading/graph/badge.svg?token=0EH5wOkx45)](https://codecov.io/gh/Tranduy1dol/trading)
 
-# Performance Benchmarks
+# ⚡ Ultra-Low-Latency Trading Engine
+
+A single-threaded, zero-copy trading engine built in Rust, designed for **sub-11 µs wire-to-wire latency** on commodity Linux hardware. The system implements a full vertical stack from a bitmap-accelerated L3 order book to an `io_uring`-based network gateway with crash-fault tolerance.
+
+## Key Features
+
+- 🏗️ **Hexagonal Architecture** — Clean separation between Domain, Application, and Gateway layers with compile-time enforced boundaries
+- 📖 **L3 Order Book** — Price levels indexed by a hardware-accelerated bitmap for O(1) best-bid/ask lookup and cancel operations
+- 🔌 **io_uring Gateway** — Fully asynchronous TCP reactor using Linux `io_uring` for zero-syscall batched I/O
+- 📡 **Market Data Broadcast** — Real-time `BboUpdate` fan-out to all connected clients on every book mutation
+- 💾 **Write-Ahead Log** — Crash-fault tolerant journal with async `io_uring` persistence and startup replay
+- 🛑 **Graceful Shutdown** — `SIGINT`/`SIGTERM` signal handling with journal flush and connection teardown
+- 🔒 **Zero-Copy Protocol** — Packed C-repr structs transmitted directly over TCP with no serialization overhead
+
+## Architecture
+
+```mermaid
+graph LR
+    subgraph "Network Layer (io_uring)"
+        C1[Client A] -->|TCP| R[Reactor]
+        C2[Client B] -->|TCP| R
+        C3[Client N] -->|TCP| R
+    end
+
+    subgraph "Gateway Crate"
+        R -->|decode| D[Codec]
+        D -->|Command| E[Engine Thread]
+        E -->|Response| EN[Encoder]
+        EN -->|bytes| R
+        R -->|raw frame| J[Journal / WAL]
+        E -->|MarketDataEvent| B[Broadcaster]
+        B -->|BboUpdate| R
+    end
+
+    subgraph "Application Crate"
+        E -->|add/cancel/modify| EX[Exchange]
+    end
+
+    subgraph "Domain Crate"
+        EX -->|route| OB[OrderBook]
+        OB --> PL[PriceLevel Bitmap]
+        OB --> OP[OrderPool]
+        OB --> OQ[OrderQueue DLL]
+    end
+```
+
+**Data flow**: `Client TCP write` → `io_uring read` → `Decode` → `Engine process` → `Encode` → `io_uring write` → `Client TCP read`
+
+All processing happens on a **single thread pinned to a physical CPU core** (LMAX Disruptor pattern), eliminating all lock contention and context-switch overhead.
+
+## Project Structure
+
+```
+crates/
+├── domain/         # Pure business logic: OrderBook, PriceLevel, Trade, OrderPool
+├── application/    # Engine thread: Command → Exchange → Response mapping
+└── gateway/        # io_uring reactor, binary protocol codec, journal, session management
+    ├── src/
+    │   ├── reactor.rs    # Main io_uring event loop
+    │   ├── codec.rs      # Zero-copy encode/decode
+    │   ├── protocol.rs   # Packed C-repr message structs
+    │   ├── journal.rs    # Write-ahead log (WAL)
+    │   └── session.rs    # Per-client TCP buffer management
+    ├── benches/
+    │   └── latency_bench.rs  # Wire-to-wire Criterion benchmark
+    └── tests/
+        └── e2e_test.rs       # Multi-client integration tests
+```
+
+## Getting Started
+
+### Prerequisites
+- **Linux** (required for `io_uring`)
+- **Rust nightly** toolchain
+
+### Build & Run
+```bash
+cargo build --release
+./target/release/gateway          # Listens on 0.0.0.0:9999
+```
+
+### Run Tests
+```bash
+cargo test --workspace
+```
+
+### Run Benchmarks
+```bash
+# Pin to a single core to isolate OS scheduler noise
+taskset -c 2 cargo bench
+```
+
+## Performance Benchmarks
 
 ### 1. What is Being Benchmarked?
 The engine uses `criterion` to measure performance across two critical execution layers:
@@ -11,13 +103,12 @@ The engine uses `criterion` to measure performance across two critical execution
 *   **Domain**: We pre-allocate an initial cache-warmed order book state containing 100 deep price levels on both the Buy and Sell sides to simulate realistic traversal overhead.
 *   **Gateway**: Pings structured `NewOrderMsg` memory blocks over `TCP_NODELAY` loopback sockets, tracking the exact `Instant::now()` until the corresponding `FillMsg` is read from the socket.
 
-To reproduce identical results locally (with hardware core-pinning enabled to isolate OS scheduler noise):
-```bash
-taskset -c 2 cargo bench
-```
-
 ### 3. Continuous Integration Results
 These are the live benchmark results generated automatically by the latest GitHub Actions CI run:
 <!-- BENCH_START -->
 
 <!-- BENCH_END -->
+
+## License
+
+MIT

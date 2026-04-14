@@ -217,3 +217,132 @@ fn test_end_to_end_pipeline() {
     test_cancel_nonexistent(&mut stream);
     test_cancel_existing(&mut stream);
 }
+
+#[test]
+fn test_multi_client_broadcast() {
+    let addr = "127.0.0.1:19997";
+
+    // Spawn the gateway reactor in the background
+    thread::spawn(move || {
+        let temp = NamedTempFile::new().unwrap();
+        let path = temp.path().to_str().unwrap().to_string();
+        gateway::reactor::run(addr, &path);
+    });
+
+    // Wait for the reactor to bind the port
+    thread::sleep(Duration::from_millis(500));
+
+    // Connect TWO independent clients
+    let mut client_a = TcpStream::connect(addr).expect("Client A failed to connect");
+    client_a
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    client_a.set_nodelay(true).unwrap();
+
+    // Small delay to let io_uring register client A's read before connecting B
+    thread::sleep(Duration::from_millis(50));
+
+    let mut client_b = TcpStream::connect(addr).expect("Client B failed to connect");
+    client_b
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    client_b.set_nodelay(true).unwrap();
+
+    // Small delay to let io_uring register client B's read
+    thread::sleep(Duration::from_millis(50));
+
+    println!("--- Test: Multi-Client Broadcast ---");
+
+    // 1. Client A sends a maker SELL order (rests on book)
+    let sell = NewOrderMsg {
+        client_seq: 1,
+        order_id: 100,
+        user_id: 1,
+        asset_id: 1,
+        price: 10500,
+        quantity: 200,
+        side: 1,       // Sell
+        order_type: 0, // GTC
+    };
+    send_msg(&mut client_a, MSG_NEW_ORDER, &sell);
+    println!("  Client A sent: SELL 200 @ 10500 (maker)");
+
+    // Client A should receive BBO_UPDATE (it's the sender, broadcast goes to all)
+    let (msg_type_a, body_a) = read_response(&mut client_a);
+    assert_eq!(
+        msg_type_a, MSG_BBO_UPDATE,
+        "Client A: expected BboUpdate after own maker order"
+    );
+    let bbo_a: BboUpdateMsg =
+        unsafe { ptr::read_unaligned(body_a.as_ptr() as *const BboUpdateMsg) };
+    println!(
+        "  Client A received BBO_UPDATE: price={} qty={} side={}",
+        { bbo_a.price },
+        { bbo_a.quantity },
+        { bbo_a.side }
+    );
+    assert_eq!({ bbo_a.price }, 10500);
+    assert_eq!({ bbo_a.quantity }, 200);
+
+    // Client B should also receive the same BBO_UPDATE broadcast
+    let (msg_type_b, body_b) = read_response(&mut client_b);
+    assert_eq!(
+        msg_type_b, MSG_BBO_UPDATE,
+        "Client B: expected BboUpdate broadcast from Client A's order"
+    );
+    let bbo_b: BboUpdateMsg =
+        unsafe { ptr::read_unaligned(body_b.as_ptr() as *const BboUpdateMsg) };
+    println!(
+        "  Client B received BBO_UPDATE: price={} qty={} side={}",
+        { bbo_b.price },
+        { bbo_b.quantity },
+        { bbo_b.side }
+    );
+    assert_eq!({ bbo_b.price }, 10500);
+    assert_eq!({ bbo_b.quantity }, 200);
+
+    println!("  ✓ Both clients received the broadcast!\n");
+
+    // 2. Client B sends a taker BUY order (matches Client A's sell)
+    let buy = NewOrderMsg {
+        client_seq: 1,
+        order_id: 200,
+        user_id: 2,
+        asset_id: 1,
+        price: 10500,
+        quantity: 200,
+        side: 0,       // Buy
+        order_type: 0, // GTC
+    };
+    send_msg(&mut client_b, MSG_NEW_ORDER, &buy);
+    println!("  Client B sent: BUY 200 @ 10500 (taker, will match)");
+
+    // Client B should receive FILL (it's the sender of the taker order)
+    let (fill_type, fill_body) = read_response(&mut client_b);
+    assert_eq!(
+        fill_type, MSG_FILL,
+        "Client B: expected Fill after taker match"
+    );
+    let fill: FillMsg = unsafe { ptr::read_unaligned(fill_body.as_ptr() as *const FillMsg) };
+    println!("  Client B received FILL: price={} qty={}", { fill.price }, {
+        fill.quantity
+    });
+    assert_eq!({ fill.price }, 10500);
+    assert_eq!({ fill.quantity }, 200);
+
+    // Both clients should receive BBO_UPDATE (level cleared after full match)
+    let (bbo_type_b, _) = read_response(&mut client_b);
+    assert_eq!(
+        bbo_type_b, MSG_BBO_UPDATE,
+        "Client B: expected BboUpdate after match"
+    );
+
+    let (bbo_type_a, _) = read_response(&mut client_a);
+    assert_eq!(
+        bbo_type_a, MSG_BBO_UPDATE,
+        "Client A: expected BboUpdate broadcast from Client B's match"
+    );
+
+    println!("  ✓ Cross-client fill + broadcast verified!\n");
+    println!("--- Multi-Client Broadcast: ALL PASSED ---");
+}
