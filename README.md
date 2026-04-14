@@ -53,7 +53,25 @@ The engine uses `criterion` to measure performance across two critical execution
 ### 3. Continuous Integration Results
 These are the live benchmark results generated automatically by the latest GitHub Actions CI run:
 <!-- BENCH_START -->
+```text
+OrderBook_100Level/add_taker_order_ioc
+                        time:   [321.63 ns 343.26 ns 362.64 ns]
 
+OrderBook_100Level/add_maker_order
+                        time:   [343.72 ns 365.41 ns 387.30 ns]
+
+OrderBook_100Level/cancel_best_bid
+                        time:   [178.43 ns 190.49 ns 202.86 ns]
+
+wire_to_wire/order_match_roundtrip
+                        time:   [208.60 µs 208.77 µs 208.94 µs]
+                        thrpt:  [4.7862 Kelem/s 4.7899 Kelem/s 4.7939 Kelem/s]
+
+wire_to_wire/cancel_reject_roundtrip
+                        time:   [32.048 µs 32.144 µs 32.235 µs]
+                        thrpt:  [31.022 Kelem/s 31.110 Kelem/s 31.203 Kelem/s]
+
+```
 <!-- BENCH_END -->
 
 ## License
