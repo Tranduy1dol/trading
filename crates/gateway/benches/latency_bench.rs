@@ -19,11 +19,17 @@ fn write_frame<T: Sized>(buf: &mut Vec<u8>, msg_type: u8, msg: &T) {
     buf.extend_from_slice(bytes);
 }
 
-fn read_fill(stream: &mut TcpStream, read_buf: &mut [u8]) {
-    let mut len_buf = [0u8; 4];
-    stream.read_exact(&mut len_buf).unwrap();
-    let len = u32::from_le_bytes(len_buf) as usize;
-    stream.read_exact(&mut read_buf[..len]).unwrap();
+fn read_response_skip_bbo(stream: &mut TcpStream, read_buf: &mut [u8]) {
+    loop {
+        let mut len_buf = [0u8; 4];
+        stream.read_exact(&mut len_buf).unwrap();
+        let len = u32::from_le_bytes(len_buf) as usize;
+        stream.read_exact(&mut read_buf[..len]).unwrap();
+        // Skip over broadcast frames; return on actual responses
+        if read_buf[0] != MSG_BBO_UPDATE {
+            return;
+        }
+    }
 }
 
 // ─── server lifecycle ─────────────────────────────────────
@@ -83,7 +89,7 @@ fn bench_wire_to_wire(c: &mut Criterion) {
         write_frame(&mut buf, MSG_NEW_ORDER, &buy);
 
         stream.write_all(&buf).unwrap();
-        read_fill(&mut stream, &mut read_buf);
+        read_response_skip_bbo(&mut stream, &mut read_buf);
     }
 
     // Benchmark: order match round-trip
@@ -128,7 +134,7 @@ fn bench_wire_to_wire(c: &mut Criterion) {
 
                 // Send both, read fill
                 stream.write_all(&send_buf).unwrap();
-                read_fill(&mut stream, &mut read_buf);
+                read_response_skip_bbo(&mut stream, &mut read_buf);
 
                 order_id += 2;
             }
@@ -155,7 +161,7 @@ fn bench_wire_to_wire(c: &mut Criterion) {
                 write_frame(&mut send_buf, MSG_CANCEL_ORDER, &cancel);
 
                 stream.write_all(&send_buf).unwrap();
-                read_fill(&mut stream, &mut read_buf);
+                read_response_skip_bbo(&mut stream, &mut read_buf);
 
                 order_id += 1;
             }

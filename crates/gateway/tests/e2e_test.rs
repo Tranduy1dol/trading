@@ -69,6 +69,19 @@ fn test_order_matching(stream: &mut TcpStream) {
     send_msg(stream, MSG_NEW_ORDER, &sell);
     println!("  Sent: SELL 100 @ 10010 (maker, will rest)");
 
+    let (msg_type, body) = read_response(stream);
+    assert_eq!(
+        msg_type, MSG_BBO_UPDATE,
+        "expected BboUpdate broadcast after resting sell"
+    );
+    let bbo: BboUpdateMsg = unsafe { ptr::read_unaligned(body.as_ptr() as *const BboUpdateMsg) };
+    println!(
+        "  Received BBO_UPDATE: price={} qty={} side={}",
+        { bbo.price },
+        { bbo.quantity },
+        { bbo.side }
+    );
+
     // Small delay so the reactor processes the first order
     thread::sleep(Duration::from_millis(10));
 
@@ -107,6 +120,13 @@ fn test_order_matching(stream: &mut TcpStream) {
     assert_eq!({ fill.price }, 10010);
     assert_eq!({ fill.quantity }, 50);
     assert_eq!({ fill.taker_side }, 0); // Buy
+
+    // Read the BBO_UPDATE triggered by the partial fill
+    let (bbo_type, _) = read_response(stream);
+    assert_eq!(
+        bbo_type, MSG_BBO_UPDATE,
+        "expected BboUpdate broadcast after match"
+    );
 
     println!("  ✓ Order matching works!\n");
 }
@@ -161,6 +181,13 @@ fn test_cancel_existing(stream: &mut TcpStream) {
     println!("    client_seq: {}", { ack.client_seq });
 
     assert_eq!({ ack.client_seq }, 4);
+
+    // Read the BBO_UPDATE triggered by the cancel
+    let (bbo_type, _) = read_response(stream);
+    assert_eq!(
+        bbo_type, MSG_BBO_UPDATE,
+        "expected BboUpdate broadcast after cancel"
+    );
 
     println!("  ✓ Cancel existing order works!\n");
 }
