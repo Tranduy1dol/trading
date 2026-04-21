@@ -1,20 +1,21 @@
 [![codecov](https://codecov.io/gh/Tranduy1dol/trading/graph/badge.svg?token=0EH5wOkx45)](https://codecov.io/gh/Tranduy1dol/trading)
 
-# ⚡ Ultra-Low-Latency Trading Engine
+# trading
 
-A single-threaded, zero-copy trading engine built in Rust, designed for **sub-11 µs wire-to-wire latency** on commodity Linux hardware. The system implements a full vertical stack from a bitmap-accelerated L3 order book to an `io_uring`-based network gateway with crash-fault tolerance.
+A single-threaded, zero-copy trading engine built in Rust, designed for low latency on commodity Linux hardware.
 
 ## Key Features
 
-- 🏗️ **Hexagonal Architecture** — Clean separation between Domain, Application, and Gateway layers with compile-time enforced boundaries
-- 📖 **L3 Order Book** — Price levels indexed by a hardware-accelerated bitmap for O(1) best-bid/ask lookup and cancel operations
-- 🔌 **io_uring Gateway** — Fully asynchronous TCP reactor using Linux `io_uring` for zero-syscall batched I/O
-- 📡 **Market Data Broadcast** — Real-time `BboUpdate` fan-out to all connected clients on every book mutation
-- 💾 **Write-Ahead Log** — Crash-fault tolerant journal with async `io_uring` persistence and startup replay
-- 🛑 **Graceful Shutdown** — `SIGINT`/`SIGTERM` signal handling with journal flush and connection teardown
-- 🔒 **Zero-Copy Protocol** — Packed C-repr structs transmitted directly over TCP with no serialization overhead
+- **Hexagonal Architecture** — Clean separation between Domain, Application, and Gateway layers with compile-time enforced boundaries
+- **L3 Order Book** — Price levels indexed by a hardware-accelerated bitmap for O(1) best-bid/ask lookup and cancel operations
+- **io_uring Gateway** — Fully asynchronous TCP reactor using Linux `io_uring` for zero-syscall batched I/O
+- **Market Data Broadcast** — Real-time `BboUpdate` fan-out to all connected clients on every book mutation
+- **Write-Ahead Log** — Crash-fault tolerant journal with async `io_uring` persistence and startup replay
+- **Graceful Shutdown** — `SIGINT`/`SIGTERM` signal handling with journal flush and connection teardown
+- **Zero-Copy Protocol** — Packed C-repr structs transmitted directly over TCP with no serialization overhead
 
-> 📐 For a deep dive into the system design, data structures, wire protocol, and data flow diagrams, see **[docs/architecture.md](docs/architecture.md)**.
+> [!IMPORTANT]
+> For a deep dive into the system design, data structures, wire protocol, and data flow diagrams, see **[docs/architecture.md](docs/architecture.md)**.
 
 ## Getting Started
 
